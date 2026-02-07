@@ -38,3 +38,12 @@ The site relies on the following libraries (bundled in the `rps 2020` directory)
 
 No external package manager is required; all dependencies are vendored in the repository.
 
+## Data Collection Scripts
+
+This repository also includes `broward_case_search.py`, a Playwright-based helper for collecting recent foreclosure filings from the Broward Clerk case search. To use it, install Playwright and pandas, then run the script from the repo root:
+
+```bash
+pip install playwright pandas
+playwright install
+python broward_case_search.py
+```
