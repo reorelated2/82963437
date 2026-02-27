@@ -1,40 +1,59 @@
-# RPS Residential Website
+# South Florida Buyer Command Center (Expo + Node + Playwright)
 
-This repository contains the source for **RPS Residential** (also known as *Rocket Property Solutions*), a small static site that allows home owners to submit their property details. Most of the site is static HTML, CSS and JavaScript with a PHP form handler.
+This repository now includes a production-oriented scaffold for a **Redfin-agent consultation app** with:
 
-## Repository Layout
+- **Mobile app**: React Native + Expo + TypeScript (`mobile/`)
+- **Backend API**: Node.js + Express + TypeScript (`backend/`)
+- **Collector worker**: Playwright scraping public Redfin market pages on a schedule
+- **Database**: Supabase Postgres schema migrations (`supabase/migrations/`)
 
-- `rps 2020.zip` – archive containing the full web site including `index.html`, assets and JavaScript.
-- Unpacked files (`index.txt`, `partners.html`, etc.) – additional static pages and resources.
-- `mail.php` – PHP script used to email form submissions.
-- `.github/workflows/` – GitHub Actions workflows for deployment.
+## Key Features Implemented
 
-## Building and Running
+### Mobile (Expo)
+- Voice/rapid-intake-ready consultation screen + readiness meter calculation.
+- Rocket Mortgage ONE+ CTA script card trigger when financing is **Need Lender**.
+- Score + strategy screen with **Client Mode** toggle and **Text-to-Speech** button.
+- Market report screen rendering cached market metrics and negotiation posture.
+- ARV + Offer tools screen including deal rating and offer strength score.
+- Offline caching helpers for latest 10 market reports and 20 clients.
 
-No build step is required. If you wish to view or modify the site locally:
+### Backend (Express + Playwright)
+- `GET /markets/:city` for cached market snapshots.
+- `POST /strategy` for strict JSON AI strategy generation.
+- `POST /clients` for persisting consultation outcomes.
+- Rate limiting and retries for resilient operation.
+- Scheduled collector (every 6 hours) with fallback seed values if scraping fails.
 
-1. Unzip `rps 2020.zip` which will create a directory `rps 2020/` with all the HTML, CSS and JS files.
-2. Serve the directory with any web server. For example:
-   ```bash
-   unzip rps\ 2020.zip
-   php -S localhost:8000 -t "rps 2020"
-   ```
-3. Visit <http://localhost:8000/index.html> in your browser.
+## Setup
 
-`mail.php` requires PHP 7+ and a configured mail server in order to send emails.
+### 1) Mobile app
+```bash
+cd mobile
+npm install
+npm run start
+```
 
-## Deployment
+### 2) Backend API
+```bash
+cd backend
+npm install
+npm run dev
+```
 
-The repository is configured to deploy automatically to GitHub Pages. Whenever changes are pushed to the `main` branch, the workflow defined in `.github/workflows/static.yml` uploads the site and publishes it as a GitHub Pages site.
+Environment variables for backend:
 
-## Dependencies
+```bash
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+OPENAI_API_KEY=
+PORT=8080
+RUN_COLLECTOR_ON_BOOT=true
+```
 
-The site relies on the following libraries (bundled in the `rps 2020` directory):
+### 3) Supabase migration
+Run the SQL in `supabase/migrations/001_initial_schema.sql` using the Supabase SQL editor or CLI migration flow.
 
-- [Bootstrap](https://getbootstrap.com/) – styling and layout.
-- [jQuery](https://jquery.com/) – DOM utilities and AJAX requests.
-- [Font Awesome](https://fontawesome.com/) – icons.
-- Pushnami manifest (`manifest.json`) for notifications.
-
-No external package manager is required; all dependencies are vendored in the repository.
-
+## Notes
+- The mobile app never scrapes directly; it reads from backend cached results.
+- If collector extraction fails, fallback metrics are used and persisted.
+- Metrics that are not reliably present are returned/displayed as `Not available`.
