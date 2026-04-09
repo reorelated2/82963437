@@ -21,6 +21,8 @@ This repository now includes a production-oriented scaffold for a **Redfin-agent
 - `GET /markets/:city` for cached market snapshots.
 - `POST /strategy` for strict JSON AI strategy generation.
 - `POST /clients` for persisting consultation outcomes.
+- `GET /mls/hiram-zone` returns pre-scored 20 target-zone MLS listings (18 active after filtering).
+- `POST /mls/analyze` merges MLS feeds, deduplicates, filters by zone/budget, and returns ranked motivation signals.
 - Rate limiting and retries for resilient operation.
 - Scheduled collector (every 6 hours) with fallback seed values if scraping fails.
 

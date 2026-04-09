@@ -6,6 +6,7 @@ import { getMarket, saveClient } from './lib/db';
 import { generateStrategy } from './lib/aiEngine';
 import { collectRedfinMarkets } from './lib/redfinCollector';
 import { startCollectorSchedule } from './collector/scheduler';
+import { analyzeMlsFeeds, getHiramSeedAnalysis, type MlsListing } from './lib/mlsAnalyzer';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -23,6 +24,22 @@ app.get('/markets/:city', async (req, res) => {
 app.post('/strategy', async (req, res) => {
   const result = await pRetry(() => generateStrategy(req.body), { retries: 2 });
   return res.json(result);
+});
+
+
+app.get('/mls/hiram-zone', (_req, res) => {
+  return res.json(getHiramSeedAnalysis());
+});
+
+app.post('/mls/analyze', (req, res) => {
+  const { feeds, config } = req.body as { feeds?: MlsListing[][]; config?: { targetZip?: string; maxBudget?: number } };
+
+  if (!Array.isArray(feeds) || feeds.length === 0) {
+    return res.status(400).json({ message: 'feeds must be a non-empty array of MLS feeds' });
+  }
+
+  const analysis = analyzeMlsFeeds(feeds, config ?? {});
+  return res.json(analysis);
 });
 
 app.post('/clients', async (req, res) => {
