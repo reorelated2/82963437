@@ -1,0 +1,11 @@
+{
+  "name": "real-estate-operating-agent",
+  "private": true,
+  "version": "2.1.0",
+  "scripts": {
+    "test": "node --check brains.js && node --check reader.js && node --check sidepanel.js && node --check background.js && node test/brains.test.js && node test/reader.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
