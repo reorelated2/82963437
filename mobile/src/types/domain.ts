@@ -24,15 +24,4 @@ export interface MarketSnapshot {
   sourceUrl: string;
 }
 
-export interface StrategyJson {
-  leadScore: LeadLabel;
-  readinessPercent: number;
-  summary: string;
-  arvMath: string;
-  scripts: {
-    marketDropping: string;
-    ratesHigh: string;
-    lowInventory: string;
-  };
-  nextAction: string;
-}
+export type { LiaisonBrief, PricingScenario, StrategyJson } from '../services/liaisonBrief';

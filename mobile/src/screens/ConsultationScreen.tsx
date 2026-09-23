@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Button, Text, View } from 'react-native';
 import { computeReadinessPercent } from '../services/intake';
 import { ROCKET_MORTGAGE_ONE_PLUS_SCRIPT, shouldShowRocketCta } from '../services/rocketScript';
 import type { IntakeAnswers } from '../types/domain';
 
-const seed: Partial<IntakeAnswers> = {
+const seed: IntakeAnswers = {
   motivation: 'Lease Expiring',
   timeline: '30-60 Days',
   sellToBuy: 'No',
@@ -14,15 +14,19 @@ const seed: Partial<IntakeAnswers> = {
   targetPrice: '$300K-$450K',
 };
 
-export const ConsultationScreen = (): React.JSX.Element => {
-  const [answers, setAnswers] = useState<Partial<IntakeAnswers>>(seed);
+interface Props {
+  answers: Partial<IntakeAnswers>;
+  onChange: (answers: Partial<IntakeAnswers>) => void;
+}
+
+export const ConsultationScreen = ({ answers, onChange }: Props): React.JSX.Element => {
   const readiness = useMemo(() => computeReadinessPercent(answers), [answers]);
 
   return (
     <View style={{ padding: 16, gap: 10 }}>
       <Text style={{ fontSize: 24, fontWeight: '700' }}>Initial Buyer Consultation</Text>
       <Text>Voice-to-form mode and rapid tap mode write into the same intake schema.</Text>
-      <Button title="Simulate Voice Brain Dump Autofill" onPress={() => setAnswers(seed)} />
+      <Button title="Simulate Voice Brain Dump Autofill" onPress={() => onChange(seed)} />
       <Text>Buyer Readiness Meter: {readiness}%</Text>
       {shouldShowRocketCta(answers) ? (
         <View style={{ borderWidth: 1, borderRadius: 12, padding: 12 }}>

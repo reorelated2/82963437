@@ -19,7 +19,7 @@ This repository now includes a production-oriented scaffold for a **Redfin-agent
 
 ### Backend (Express + Playwright)
 - `GET /markets/:city` for cached market snapshots.
-- `POST /strategy` for strict JSON AI strategy generation.
+- `POST /strategy` for a Redfin liaison brief. ChatGPT custom instructions live in `prompts/chatgpt-custom-instructions.txt` (997 characters). Every brief includes the one-line recommendation, three-point rationale, five-step plan, client text and email, pricing scenarios, and templates. Prices and names stay limited to figures already on the lead.
 - `POST /clients` for persisting consultation outcomes.
 - `GET /mls/hiram-zone` returns pre-scored 20 target-zone MLS listings (18 active after filtering).
 - `POST /mls/analyze` merges MLS feeds, deduplicates, filters by zone/budget, and returns ranked motivation signals.
