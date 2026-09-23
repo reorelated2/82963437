@@ -1,10 +1,22 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
+import { buildStrategy } from './src/services/liaisonBrief';
 import { ConsultationScreen } from './src/screens/ConsultationScreen';
 import { ScoreStrategyScreen } from './src/screens/ScoreStrategyScreen';
 import { MarketReportScreen } from './src/screens/MarketReportScreen';
 import { ArvToolsScreen } from './src/screens/ArvToolsScreen';
-import type { MarketSnapshot, StrategyJson } from './src/types/domain';
+import type { IntakeAnswers, MarketSnapshot } from './src/types/domain';
+import { computeReadinessPercent } from './src/services/intake';
+
+const seed: IntakeAnswers = {
+  motivation: 'Lease Expiring',
+  timeline: '30-60 Days',
+  sellToBuy: 'No',
+  financing: 'Need Lender',
+  targetCity: 'Hialeah',
+  propertyType: 'Condo',
+  targetPrice: '$300K-$450K',
+};
 
 const market: MarketSnapshot = {
   city: 'Hialeah',
@@ -18,26 +30,29 @@ const market: MarketSnapshot = {
   sourceUrl: 'https://www.redfin.com/city/7643/FL/Hialeah/housing-market',
 };
 
-const strategy: StrategyJson = {
-  leadScore: 'WARM',
-  readinessPercent: 78,
-  summary: 'Buyer has urgency and negotiable market conditions to pursue favorable credits.',
-  arvMath: 'Target acquisition under median supports moderate upside after rehab.',
-  scripts: {
-    marketDropping: 'Smart play—medians dipped, opening spreads for equity grabs. Lock low, ride the rebound.',
-    ratesHigh: 'Rates sting, but inventory gives leverage—negotiate seller credits for buydowns. This yields strong NOI.',
-    lowInventory: 'Target entry units for quick equity grabs. Cash? We skip contingencies and close fast.',
-  },
-  nextAction: 'Connect buyer with lender and book a 3-home tour this week.',
-};
-
 export default function App(): React.JSX.Element {
   const [clientMode, setClientMode] = useState(false);
+  const [answers, setAnswers] = useState<Partial<IntakeAnswers>>(seed);
+  const strategy = useMemo(
+    () =>
+      buildStrategy({
+        message: 'Redfin lead from Agent Tools',
+        answers,
+        market: {
+          city: answers.targetCity && answers.targetCity !== 'Custom' ? answers.targetCity : market.city,
+          medianSalePrice: market.medianSalePrice,
+          avgDom: market.avgDom,
+          yoyChangePercent: market.yoyChangePercent,
+        },
+        readinessPercent: computeReadinessPercent(answers),
+      }),
+    [answers],
+  );
 
   return (
     <ScrollView>
       <View style={{ marginTop: 40 }}>
-        <ConsultationScreen />
+        <ConsultationScreen answers={answers} onChange={setAnswers} />
         <ScoreStrategyScreen
           strategy={strategy}
           clientMode={clientMode}

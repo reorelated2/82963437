@@ -48,7 +48,7 @@ app.post('/clients', async (req, res) => {
     answers,
     leadLabel: strategy.leadScore,
     readinessPercent: strategy.readinessPercent,
-    transactionPlan: { nextAction: strategy.nextAction },
+    transactionPlan: { nextAction: strategy.nextAction, liaison: strategy.liaison ?? null },
   });
   return res.status(201).json({ id });
 });
