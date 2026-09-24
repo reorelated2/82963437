@@ -23,20 +23,28 @@ node -v
 ```bash
 cd ops
 npm install
+npm run typecheck
+npm test
 npm start
 ```
 
-Expected result: a line that says `Kleinman Desk running at http://127.0.0.1:8787`.
+`npm run typecheck` should finish with no errors. `npm test` should finish with 25 passed and 0 failed.
+
+Expected result of `npm start`: a line that says `KyleOS Command (kleinman-lead-desk) running at http://127.0.0.1:8787`.
 
 Leave that window open. Closing it stops the desk.
 
-## 3. Open the desk
+The desk listens only on this computer. To use a different local password, set `OPS_PASSWORD` in that same window before `npm start`.
+
+## 3. Sign in
 
 1. Open Chrome or Safari.
 2. Click the address bar.
 3. Paste `http://127.0.0.1:8787` and press Return.
+4. Type the local password. The default is `local-kyle`.
+5. Click **Open the board**.
 
-Expected result: the page title is Kleinman Desk. The top line is about who needs attention. A banner says Redfin stays the system of record.
+Expected result: the page title is KyleOS Command. The package name kleinman-lead-desk is under the title. A banner says Redfin stays the system of record. A wrong password stays on the sign-in screen.
 
 ## 4. Optional: read screenshots
 
@@ -55,7 +63,7 @@ If Tesseract is missing, paste the text instead. The desk will say screenshot re
 ## 5. See a sample day
 
 1. On the desk, click **Load sample day**.
-2. Expected result: DEMO labels appear. Those people are fake.
+2. Expected result: DEMO labels appear on Nate Alvarez, Maria Chen, Jordan Hale, Sam Ortiz, and Pat Nguyen. Pat Nguyen is under **No next action**. **Recent replies** says the connector is blocked. **System health** lists Redfin Partner Tools, MLS, ShowingTime, Quo SMS, and Gmail import as disconnected. Those people are fake. A picture of this board is in `docs/screenshots/command-board.png`.
 
 Click **Remove sample records** before you rely on the desk for a real client. Sample rows are stored in the same file, and they are marked so you can tell them apart.
 

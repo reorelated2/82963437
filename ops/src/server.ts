@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { clearCookieHeader, cookieHeader, login, sessionValid } from './auth.ts';
 import { openDatabase } from './db.ts';
 import { decodeImage, readScreenshot } from './ocr.ts';
 import type { SqlDb } from './sql.ts';
@@ -80,8 +81,25 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
   const path = url.pathname;
   const method = req.method ?? 'GET';
   if (method === 'GET' && path === '/api/health') {
-    sendJson(res, 200, { ok: true, service: 'kleinman-lead-desk', outbound: 'draft' });
+    sendJson(res, 200, { ok: true, service: 'kleinman-lead-desk', product: 'KyleOS Command', outbound: 'draft' });
     return;
+  }
+  if (method === 'GET' && path === '/api/session') {
+    return sendJson(res, 200, { ok: sessionValid(db, req.headers.cookie) });
+  }
+  if (method === 'POST' && path === '/api/login') {
+    const body = await readJson(req);
+    const result = login(db, typeof body.password === 'string' ? body.password : '');
+    if (!result.ok) return sendJson(res, 401, { error: 'That password did not match.' });
+    res.setHeader('Set-Cookie', cookieHeader(result.token));
+    return sendJson(res, 200, { ok: true });
+  }
+  if (method === 'POST' && path === '/api/logout') {
+    res.setHeader('Set-Cookie', clearCookieHeader());
+    return sendJson(res, 200, { ok: true });
+  }
+  if (path.startsWith('/api/') && !sessionValid(db, req.headers.cookie)) {
+    return sendJson(res, 401, { error: 'Sign in required.' });
   }
   if (method === 'GET' && path === '/api/workspace') return sendJson(res, 200, getWorkspace(db));
   if (method === 'GET' && path === '/api/settings') return sendJson(res, 200, getSettings(db));
@@ -247,7 +265,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirectRun) {
   startServer().then((running) => {
-    console.log(`Kleinman Desk running at http://127.0.0.1:${running.port}`);
+    console.log(`KyleOS Command (kleinman-lead-desk) running at http://127.0.0.1:${running.port}`);
   }).catch((error) => {
     console.error(error);
     process.exit(1);

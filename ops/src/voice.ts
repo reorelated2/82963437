@@ -121,10 +121,18 @@ export function planFollowUp(extraction: Extraction, now: Date): FollowUpPlan {
   const confirmed = known(extraction, 'showing_confirmed');
   const urgent = Boolean(requested) && !confirmed;
   const due = suggestDueAt(now, requested, urgent);
+  if (extraction.stage === 'continuing') {
+    return {
+      action: 'Answer the latest message before any new outreach.',
+      dueAt: due.toISOString(),
+      display: formatEt(due),
+      reason: 'A reply arrived while follow up was still open.',
+    };
+  }
   let action = 'Review the draft and send it yourself only if it still matches this client.';
   let reason = 'New lead facts are in the review queue.';
   if (urgent) {
-    action = 'Check whether the requested showing time can be booked. Do not tell the client it is confirmed.';
+    action = 'Check whether the requested showing time can be booked. That time is not confirmed.';
     reason = 'A showing was requested and is not confirmed.';
   } else if (!known(extraction, 'budget')) {
     action = 'Ask for the price range before sending homes.';

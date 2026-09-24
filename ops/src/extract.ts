@@ -25,6 +25,7 @@ export const FIELD_KEYS = [
 
 export type FieldKey = (typeof FIELD_KEYS)[number];
 export type FactStatus = 'known' | 'data_needed' | 'unclear';
+export type FactBasis = 'said' | 'confirmed' | 'inferred' | 'missing' | 'stale';
 export type ConversationStage = 'new_inquiry' | 'continuing' | 'unclear';
 
 export interface FactField {
@@ -32,6 +33,7 @@ export interface FactField {
   label: string;
   value: string | null;
   status: FactStatus;
+  basis: FactBasis;
   evidence: string | null;
 }
 
@@ -189,7 +191,7 @@ export function propertyLabel(fields: Record<FieldKey, FactField>): string | nul
 function blankFields(): Record<FieldKey, FactField> {
   const fields = {} as Record<FieldKey, FactField>;
   for (const key of FIELD_KEYS) {
-    fields[key] = { key, label: LABELS[key], value: null, status: 'data_needed', evidence: null };
+    fields[key] = { key, label: LABELS[key], value: null, status: 'data_needed', basis: 'missing', evidence: null };
   }
   return fields;
 }
@@ -245,7 +247,7 @@ function setFromLabeled(
       continue;
     }
     if (key === 'showing_confirmed') {
-      setKnown(fields, key, distinct[0], 'The source explicitly labeled a confirmed showing.');
+      setKnown(fields, key, distinct[0], 'The source explicitly labeled a confirmed showing.', 'confirmed');
       continue;
     }
     if (distinct.length > 1 && new Set(distinct.map((value) => value.toLowerCase())).size > 1 && key !== 'must_haves' && key !== 'deal_breakers') {
@@ -320,6 +322,7 @@ function applyFinancing(fields: Record<FieldKey, FactField>, text: string, warni
       ...fields.financing_status,
       value: null,
       status: 'data_needed',
+      basis: 'missing',
       evidence: fields.financing_status.value,
     };
   }
@@ -377,7 +380,7 @@ function applyShowingSentences(fields: Record<FieldKey, FactField>, text: string
     if (!time) continue;
     if (isExplicitConfirmation(sentence)) {
       if (fields.showing_confirmed.status !== 'known') {
-        setKnown(fields, 'showing_confirmed', time, sentence);
+        setKnown(fields, 'showing_confirmed', time, sentence, 'confirmed');
       }
       continue;
     }
@@ -395,11 +398,11 @@ function applyIdentityGuards(fields: Record<FieldKey, FactField>, warnings: stri
   const agent = fields.assigned_agent.value?.toLowerCase() ?? '';
   const name = fields.name.value?.trim() ?? '';
   if (name && (name.toLowerCase() === 'kyle kleinman' || (agent && name.toLowerCase() === agent))) {
-    fields.name = { ...fields.name, value: null, status: 'data_needed', evidence: 'The only name matched the assigned agent.' };
+    fields.name = { ...fields.name, value: null, status: 'data_needed', basis: 'missing', evidence: 'The only name matched the assigned agent.' };
     warnings.push('The client name matched the agent, so it was not saved as the client.');
   }
   if (name && /^(redfin|unknown|n\/a|test)$/i.test(name)) {
-    fields.name = { ...fields.name, value: null, status: 'data_needed' };
+    fields.name = { ...fields.name, value: null, status: 'data_needed', basis: 'missing' };
   }
 }
 
@@ -506,8 +509,8 @@ function overlapsUnclear(evidence: string | null, value: string | null, spans: s
   return spans.some((span) => span.trim().length > 1 && haystack.includes(span));
 }
 
-function setKnown(fields: Record<FieldKey, FactField>, key: FieldKey, value: string, evidence: string): void {
-  fields[key] = { ...fields[key], value: cleanup(value), status: 'known', evidence };
+function setKnown(fields: Record<FieldKey, FactField>, key: FieldKey, value: string, evidence: string, basis: FactBasis = 'said'): void {
+  fields[key] = { ...fields[key], value: cleanup(value), status: 'known', basis, evidence };
 }
 
 function cleanup(value: string): string {

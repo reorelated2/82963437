@@ -15,9 +15,11 @@ import {
   backupDatabase,
   checkRedfinConnection,
   getContact,
+  getReview,
   getWorkspace,
   intakeLead,
   seedDemo,
+  setSuppression,
   updateSettings,
 } from '../src/workflow.ts';
 import { copyFileSync } from 'node:fs';
@@ -251,7 +253,111 @@ test('sample workspace shows each attention group and labels demo records', () =
   assert.ok(workspace.demoCount >= 1);
   assert.match(workspace.headline, /needs attention/);
   assert.equal(workspace.appointmentsToday[0].nextStep.includes('not a confirmed'), true);
+  assert.ok(workspace.noNextAction.some((item) => item.title === 'Pat Nguyen' && item.isDemo));
+  assert.match(workspace.replyConnector.nextStep, /Connector blocked/);
+  assert.ok(workspace.systemHealth.some((item) => item.title === 'ShowingTime'));
+  assert.ok(workspace.systemHealth.some((item) => item.title === 'MLS'));
   db.close();
+});
+
+async function signIn(base: string): Promise<string> {
+  const denied = await fetch(`${base}/api/workspace`);
+  assert.equal(denied.status, 401);
+  const response = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'local-kyle' }),
+  });
+  assert.equal(response.status, 200);
+  const cookie = response.headers.get('set-cookie') ?? '';
+  return cookie.split(';')[0];
+}
+
+test('ambiguous text does not become a contact or a guessed name', () => {
+  const { db } = tempDb();
+  const result = intakeLead(db, {
+    text: 'Name: N?te [illegible]\nPhone: (305) 555-0100\nPhone: (305) 555-0199\nBudget: ???',
+    sourceKind: 'paste',
+    now: NOW,
+  });
+  assert.equal(result.contactId, null);
+  assert.equal(count(db, 'contacts'), 0);
+  assert.equal(count(db, 'drafts'), 0);
+  db.close();
+});
+
+test('a different person with a similar name is not matched', () => {
+  const { db } = tempDb();
+  const nate = intakeLead(db, { text: 'Name: Nate Alvarez\nPhone: (305) 555-0148\nBudget: $650K', sourceKind: 'paste', now: NOW });
+  const nathan = intakeLead(db, { text: 'Name: Nathan Alvarez\nPhone: (305) 555-0190\nBudget: $700K', sourceKind: 'paste', now: NOW });
+  assert.equal(nate.status, 'created');
+  assert.equal(nathan.status, 'created');
+  assert.notEqual(nate.contactId, nathan.contactId);
+  assert.equal(count(db, 'contacts'), 2);
+  const second = getContact(db, nathan.contactId ?? '');
+  assert.equal(second?.facts.find((fact) => fact.key === 'budget')?.value, '$700K');
+  assert.equal(second?.conflicts.length, 0);
+  db.close();
+});
+
+test('requested showing language never says the showing is confirmed', () => {
+  const { db } = tempDb();
+  const created = intakeLead(db, { text: `${NATE}\nPhone: (305) 555-0148`, sourceKind: 'paste', now: NOW });
+  const review = getReview(db, created.reviewId ?? '');
+  const payload = review?.payload as { draftBody: string; crmNote: string; followUp: { action: string } };
+  assert.equal(/showing is confirmed|you're confirmed|you are confirmed/i.test(payload.draftBody), false);
+  assert.match(payload.crmNote, /Confirmed showing: Data needed/);
+  assert.match(payload.followUp.action, /not confirmed/i);
+  const contact = getContact(db, created.contactId ?? '');
+  assert.equal(contact?.facts.find((fact) => fact.key === 'showing_requested')?.basis, 'said');
+  assert.equal(contact?.facts.find((fact) => fact.key === 'showing_confirmed')?.basis, 'missing');
+  assert.equal(contact?.facts.find((fact) => fact.key === 'financing_status')?.status, 'data_needed');
+  db.close();
+});
+
+test('a reply in an open conversation does not restart the introduction', () => {
+  const { db } = tempDb();
+  intakeLead(db, { text: 'Name: Riley Chen\nPhone: (305) 555-0122\nProperty: North Miami property', sourceKind: 'paste', now: NOW });
+  const reply = intakeLead(db, {
+    text: `Phone: (305) 555-0122
+Riley: Is 5:30 pm still possible?
+Kyle: I can check.`,
+    sourceKind: 'paste',
+    now: NOW,
+  });
+  assert.equal(reply.status, 'attached');
+  const review = getReview(db, reply.reviewId ?? '');
+  const payload = review?.payload as { draftBody: string; followUp: { action: string }; stage: string };
+  assert.equal(payload.stage, 'continuing');
+  assert.equal(payload.draftBody.startsWith('Hey'), false);
+  assert.match(payload.followUp.action, /latest message/);
+  const contact = getContact(db, reply.contactId ?? '');
+  assert.equal(contact?.facts.find((fact) => fact.key === 'showing_confirmed')?.status, 'data_needed');
+  db.close();
+});
+
+test('opt out blocks delivery and keeps the audit trail', () => {
+  const { db } = tempDb();
+  const created = intakeLead(db, { text: 'Name: Ada Lopez\nPhone: (305) 555-0171', sourceKind: 'paste', now: NOW });
+  setSuppression(db, created.contactId ?? '', 'opted_out', NOW);
+  const again = intakeLead(db, { text: 'Name: Ada Lopez\nPhone: (305) 555-0171\nBudget: $500K', sourceKind: 'paste', now: NOW });
+  const draft = db.get(`SELECT status FROM drafts WHERE id = ?`, again.draftId ?? '');
+  assert.equal(String(draft?.status), 'blocked');
+  const blocked = attemptSend(db, again.draftId ?? '');
+  assert.equal(blocked.sent, false);
+  assert.match(blocked.reason, /opted out/);
+  assert.equal(count(db, 'sent_messages'), 0);
+  const workspace = getWorkspace(db, NOW);
+  assert.ok(workspace.failedAutomations.some((item) => item.title === 'Delivery blocked'));
+  const audits = db.all(`SELECT action FROM audit_log`);
+  assert.ok(audits.some((row) => String(row.action) === 'contact_created'));
+  assert.ok(audits.some((row) => String(row.action) === 'send_blocked'));
+  db.close();
+});
+
+test('follow up uses Eastern time after the fall clock change', () => {
+  const fridayEvening = new Date('2026-11-06T23:00:00.000Z');
+  assert.equal(nextBusinessMorning(fridayEvening).toISOString(), '2026-11-09T14:00:00.000Z');
 });
 
 test('http intake approve and blocked send survive a new process connection', async () => {
@@ -260,20 +366,22 @@ test('http intake approve and blocked send survive a new process connection', as
   const server = await startServer({ port: 0, dbPath: fixture.path });
   try {
     const base = `http://127.0.0.1:${server.port}`;
+    const cookie = await signIn(base);
     const created = await (await fetch(`${base}/api/intake`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ text: `${NATE}\nPhone: (305) 555-0188\nEmail: nate.http@example.com` }),
     })).json() as { reviewId: string; draftId: string; contactId: string; message: string };
     assert.match(created.message, /Nothing was sent/);
-    const approved = await (await fetch(`${base}/api/reviews/${created.reviewId}/approve`, { method: 'POST' })).json() as { message: string };
+    const approved = await (await fetch(`${base}/api/reviews/${created.reviewId}/approve`, { method: 'POST', headers: { cookie } })).json() as { message: string };
     assert.match(approved.message, /was not sent/);
-    const blocked = await (await fetch(`${base}/api/drafts/${created.draftId}/send`, { method: 'POST' })).json() as { sent: boolean; reason: string };
+    const blocked = await (await fetch(`${base}/api/drafts/${created.draftId}/send`, { method: 'POST', headers: { cookie } })).json() as { sent: boolean; reason: string };
     assert.equal(blocked.sent, false);
     await server.close();
     const again = await startServer({ port: 0, dbPath: fixture.path });
     try {
-      const contact = await (await fetch(`http://127.0.0.1:${again.port}/api/contacts/${created.contactId}`)).json() as { displayName: string; notes: Array<{ body: string }> };
+      const againCookie = await signIn(`http://127.0.0.1:${again.port}`);
+      const contact = await (await fetch(`http://127.0.0.1:${again.port}/api/contacts/${created.contactId}`, { headers: { cookie: againCookie } })).json() as { displayName: string; notes: Array<{ body: string }> };
       assert.equal(contact.displayName, 'Nate Alvarez');
       assert.match(contact.notes[0].body, /Nate Alvarez/);
     } finally {
@@ -314,14 +422,15 @@ image.save(${JSON.stringify(imagePath)})
   const server = await startServer({ port: 0, dbPath: join(dir, 'desk.sqlite') });
   try {
     const bytes = spawnSync('python3', ['-c', `import base64, pathlib; print(base64.b64encode(pathlib.Path(${JSON.stringify(imagePath)}).read_bytes()).decode())`], { encoding: 'utf8' });
+    const cookie = await signIn(`http://127.0.0.1:${server.port}`);
     const response = await fetch(`http://127.0.0.1:${server.port}/api/intake/screenshot`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ imageBase64: bytes.stdout.trim() }),
     });
     const body = await response.json() as { status: string; contactId: string | null; message: string };
     if (body.status === 'created' || body.status === 'attached') {
-      const contact = await (await fetch(`http://127.0.0.1:${server.port}/api/contacts/${body.contactId}`)).json() as { facts: Array<{ key: string; status: string; value: string | null }> };
+      const contact = await (await fetch(`http://127.0.0.1:${server.port}/api/contacts/${body.contactId}`, { headers: { cookie } })).json() as { facts: Array<{ key: string; status: string; value: string | null }> };
       const confirmed = contact.facts.find((fact) => fact.key === 'showing_confirmed');
       assert.equal(confirmed?.status, 'data_needed');
       const name = contact.facts.find((fact) => fact.key === 'name');
@@ -330,7 +439,7 @@ image.save(${JSON.stringify(imagePath)})
       assert.equal(body.status, 'unreadable');
       assert.match(body.message, /unclear|could not be read|Nothing was saved/i);
     }
-    const blocked = await (await fetch(`http://127.0.0.1:${server.port}/api/drafts/missing/send`, { method: 'POST' })).json() as { sent: boolean };
+    const blocked = await (await fetch(`http://127.0.0.1:${server.port}/api/drafts/missing/send`, { method: 'POST', headers: { cookie } })).json() as { sent: boolean };
     assert.equal(blocked.sent, false);
   } finally {
     await server.close();

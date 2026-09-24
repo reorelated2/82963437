@@ -4,7 +4,7 @@ One owner per task. Do not edit the same file from two sessions. Status lives he
 
 | Id | Task | Owner | Status |
 | --- | --- | --- | --- |
-| LD-1 | Lead capture, review queue, voice draft, local desk | Cursor | Done in this branch, pending Kyle's use on his computer |
+| LD-1 | Stage 1 inquiry desk: extract, match, SEND / NOTE / NEXT, Daily Command board | Cursor | Done in this branch. 25 tests passed. Pending Kyle's use on his computer. |
 | LD-2 | Review acceptance against a real pasted lead Kyle chooses | Kyle | Waiting. Use synthetic or a lead he is allowed to paste. |
 | LD-3 | Decide whether any inbox may be imported | Kyle | Blocked until he names the permitted source. |
 | LD-4 | Contact import and reactivation | Cursor | Not started. Next module after LD-2. |

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { FIELD_KEYS, extractLead, lacksIdentity, phoneLookupKey, type Extraction, type FactField } from './extract.ts';
+import { FIELD_KEYS, extractLead, lacksIdentity, phoneLookupKey, type Extraction, type FactBasis, type FactField } from './extract.ts';
 import { openDatabase } from './db.ts';
 import { formatEt, sameEtDay, zonedLocalToUtc, zonedParts } from './time.ts';
 import { text, transaction, type SqlDb } from './sql.ts';
@@ -56,6 +56,9 @@ export interface Workspace {
   milestones: AttentionItem[];
   drafts: AttentionItem[];
   failedAutomations: AttentionItem[];
+  noNextAction: AttentionItem[];
+  replyConnector: AttentionItem;
+  systemHealth: AttentionItem[];
   demoCount: number;
 }
 
@@ -166,6 +169,7 @@ export function intakeLead(db: SqlDb, input: IntakeInput): IntakeResult {
       'New lead captured. The draft is in review and was not sent.',
       now.toISOString(),
     );
+    audit(db, 'contact_created', contactId, 'contact', contactId, { name: extraction.fields.name.value });
     return {
       status: 'created' as const,
       contactId,
@@ -280,6 +284,7 @@ export function approveReview(db: SqlDb, reviewId: string, now = new Date()): { 
       );
     }
     db.run(`UPDATE contacts SET lifecycle = 'active', updated_at = ? WHERE id = ?`, now.toISOString(), contactId);
+    audit(db, 'note_saved', contactId, 'review', reviewId, { noteId, taskId });
     db.run(
       `INSERT INTO activities (id, contact_id, kind, summary, payload_json, created_at) VALUES (?, ?, 'review', ?, '{}', ?)`,
       randomUUID(),
@@ -311,14 +316,17 @@ export function attemptSend(db: SqlDb, draftId: string): { sent: false; reason: 
   db.run(`UPDATE drafts SET send_attempts = send_attempts + 1 WHERE id = ?`, draftId);
   const contactId = text(draft, 'contact_id');
   const contact = contactId ? db.get(`SELECT suppression_status FROM contacts WHERE id = ?`, contactId) : undefined;
+  let reason = 'No delivery channel is connected. Nothing was sent.';
   if (contact && text(contact, 'suppression_status') === 'opted_out') {
-    return { sent: false, reason: 'This person is marked opted out. Nothing was sent.' };
+    reason = 'This person is marked opted out. Nothing was sent.';
+  } else if (getSettings(db).outboundPaused) {
+    reason = 'Outbound automations are paused. Nothing was sent.';
+  } else if (!db.get(`SELECT id FROM authorizations WHERE workflow_key = 'client_message'`)) {
+    reason = 'No send workflow is authorized. Nothing was sent.';
   }
-  const settings = getSettings(db);
-  if (settings.outboundPaused) return { sent: false, reason: 'Outbound automations are paused. Nothing was sent.' };
-  const authorized = db.get(`SELECT id FROM authorizations WHERE workflow_key = 'client_message'`);
-  if (!authorized) return { sent: false, reason: 'No send workflow is authorized. Nothing was sent.' };
-  return { sent: false, reason: 'No delivery channel is connected. Nothing was sent.' };
+  recordDeliveryBlock(db, draftId, reason);
+  audit(db, 'send_blocked', contactId || null, 'draft', draftId, { reason });
+  return { sent: false, reason };
 }
 
 export function checkRedfinConnection(db: SqlDb, now = new Date()): { ok: false; jobId: string; message: string } {
@@ -466,6 +474,33 @@ export function getWorkspace(db: SqlDb, now = new Date()): Workspace {
     milestones,
     drafts,
     failedAutomations,
+    noNextAction: db.all(
+      `SELECT * FROM contacts WHERE next_action IS NULL OR trim(next_action) = '' ORDER BY updated_at DESC`,
+    ).map((row) => ({
+      id: text(row, 'id'),
+      contactId: text(row, 'id'),
+      title: text(row, 'display_name') || 'Unnamed lead',
+      reason: 'This contact has no next action.',
+      nextStep: 'Open the inquiry and set one next step.',
+      isDemo: numBool(row.is_demo),
+      kind: 'no_next_action',
+    })),
+    replyConnector: {
+      id: 'connector-replies',
+      contactId: null,
+      title: 'Recent replies',
+      reason: 'No inbound text or email feed is connected to this desk.',
+      nextStep: 'Connector blocked. Paste a reply when one arrives.',
+      isDemo: false,
+      kind: 'connector_blocked',
+    },
+    systemHealth: [
+      healthItem('redfin', 'Redfin Partner Tools', 'No write API is connected. Paste notes back by hand.'),
+      healthItem('mls', 'MLS', 'No MLS or IDX feed is connected. Do not invent listing status.'),
+      healthItem('showingtime', 'ShowingTime', 'No ShowingTime API is connected. Requested times stay unconfirmed.'),
+      healthItem('quo', 'Quo SMS', 'Live texting is not authorized from this desk.'),
+      healthItem('gmail', 'Gmail import', 'Client mail import is not authorized.'),
+    ],
     demoCount,
   };
 }
@@ -478,12 +513,13 @@ export function getContact(db: SqlDb, contactId: string): ContactDetail | null {
   const ordered = FIELD_KEYS.map((key) => {
     const row = byKey.get(key);
     const label = extractLead('').fields[key].label;
-    if (!row) return { key, label, value: null, status: 'data_needed' as const, evidence: null };
+    if (!row) return { key, label, value: null, status: 'data_needed' as const, basis: 'missing' as const, evidence: null };
     return {
       key,
       label,
       value: text(row, 'value') || null,
       status: text(row, 'status') as FactField['status'],
+      basis: displayBasis(row),
       evidence: text(row, 'evidence') || null,
     };
   });
@@ -676,6 +712,22 @@ Deal breakers: no ground floor`;
     now.toISOString(),
     now.toISOString(),
   );
+  db.run(
+    `UPDATE contacts SET next_action = 'Reply before sending more homes.', next_action_due_at = ?, next_action_reason = 'She asked a direct question.', next_action_owner = 'Kyle Kleinman' WHERE id = ?`,
+    now.toISOString(),
+    mariaId,
+  );
+  db.run(
+    `UPDATE contacts SET next_action = 'Confirm the requested showing. It is not booked.', next_action_due_at = ?, next_action_reason = 'DEMO showing request only.', next_action_owner = 'Kyle Kleinman' WHERE id = ?`,
+    showingAt.toISOString(),
+    jordanId,
+  );
+  db.run(
+    `UPDATE contacts SET next_action = 'Complete the overdue follow up.', next_action_due_at = ?, next_action_reason = 'DEMO overdue follow up.', next_action_owner = 'Kyle Kleinman' WHERE id = ?`,
+    new Date(now.getTime() - 26 * 60 * 60 * 1000).toISOString(),
+    samId,
+  );
+  insertDemoContact(db, 'Pat Nguyen', now);
   db.run(`INSERT INTO settings (key, value) VALUES ('demo_seeded', 'true')`);
   return { created: true };
 }
@@ -730,6 +782,7 @@ function attachPackage(db: SqlDb, input: IntakeInput, raw: string, hash: string,
     conflicts.length ? 'Existing contact updated. Conflicting facts were kept beside the original values. Nothing was sent.' : 'Existing contact updated from a repeated lead. Nothing was sent.',
     now.toISOString(),
   );
+  audit(db, 'contact_matched', contactId, 'contact', contactId, { conflicts });
   return {
     status: 'attached',
     contactId,
@@ -751,7 +804,15 @@ function createPackage(
   conflicts: Array<{ field: string; existing: string; incoming: string }>,
 ): PackageResult {
   const draft = draftClientMessage(extraction);
-  const followUp = planFollowUp(extraction, now);
+  const suppressed = text(db.get(`SELECT suppression_status FROM contacts WHERE id = ?`, contactId), 'suppression_status') === 'opted_out';
+  const followUp = suppressed
+    ? {
+        action: 'Do not contact. This person is opted out.',
+        dueAt: planFollowUp(extraction, now).dueAt,
+        display: planFollowUp(extraction, now).display,
+        reason: 'Suppression is opted out.',
+      }
+    : planFollowUp(extraction, now);
   const summary = buyerSummary(extraction);
   const conflictLines = conflicts.map((item) => `${item.field}: kept "${item.existing}". Incoming "${item.incoming}" was not overwritten.`);
   const note = `${crmNote(extraction, followUp, draft, contactId)}${conflictLines.length ? `\n\nConflicts kept\n${conflictLines.join('\n')}` : ''}`;
@@ -778,7 +839,16 @@ function createPackage(
     fields: FIELD_KEYS.map((key) => extraction.fields[key]),
     conflicts,
     scheduledSend: false,
+    suppressed,
   };
+  db.run(
+    `UPDATE contacts SET next_action = ?, next_action_due_at = ?, next_action_reason = ?, next_action_owner = 'Kyle Kleinman', updated_at = ? WHERE id = ?`,
+    followUp.action,
+    followUp.dueAt,
+    followUp.reason,
+    now.toISOString(),
+    contactId,
+  );
   db.run(
     `INSERT INTO review_items (id, contact_id, source_event_id, kind, status, title, payload_json, is_demo, created_at, updated_at)
      VALUES (?, ?, ?, 'intake', 'pending', ?, ?, ?, ?, ?)`,
@@ -794,10 +864,14 @@ function createPackage(
   const draftId = randomUUID();
   const dedupe = `draft:${contactId}:${createHash('sha256').update(draft.body).digest('hex')}`;
   const existingDraft = db.get(`SELECT id FROM drafts WHERE dedupe_key = ?`, dedupe);
+  const draftStatus = suppressed ? 'blocked' : 'draft';
+  if (suppressed) {
+    db.run(`UPDATE drafts SET status = 'blocked' WHERE contact_id = ? AND status = 'draft'`, contactId);
+  }
   if (!existingDraft) {
     db.run(
       `INSERT INTO drafts (id, contact_id, review_item_id, channel, recipient, body, context, purpose, scheduled_for, status, dedupe_key, is_demo, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       draftId,
       contactId,
       reviewId,
@@ -807,13 +881,18 @@ function createPackage(
       summary,
       draft.purpose,
       followUp.dueAt,
+      draftStatus,
       dedupe,
       isDemo ? 1 : 0,
       now.toISOString(),
     );
+  } else if (suppressed) {
+    db.run(`UPDATE drafts SET status = 'blocked', review_item_id = ? WHERE id = ?`, reviewId, text(existingDraft, 'id'));
   }
   maybeRequestedAppointment(db, contactId, extraction, isDemo, now);
-  return { reviewId, draftId: existingDraft ? text(existingDraft, 'id') : draftId, conflicts };
+  const storedDraftId = existingDraft ? text(existingDraft, 'id') : draftId;
+  audit(db, 'draft_proposed', contactId, 'draft', storedDraftId, { status: suppressed ? 'blocked' : 'draft', body: draft.body });
+  return { reviewId, draftId: storedDraftId, conflicts };
 }
 
 function savePossibleDuplicate(db: SqlDb, input: IntakeInput, raw: string, hash: string, extraction: Extraction, now: Date, candidateIds: string[]): IntakeResult {
@@ -966,7 +1045,7 @@ function applyFacts(db: SqlDb, contactId: string, extraction: Extraction, source
     const existing = db.get(`SELECT * FROM facts WHERE contact_id = ? AND field_key = ?`, contactId, key);
     if (!existing) {
       db.run(
-        `INSERT INTO facts (id, contact_id, field_key, value, status, evidence, source_event_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO facts (id, contact_id, field_key, value, status, evidence, source_event_id, updated_at, basis, observed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         randomUUID(),
         contactId,
         key,
@@ -975,6 +1054,8 @@ function applyFacts(db: SqlDb, contactId: string, extraction: Extraction, source
         field.evidence,
         sourceEventId,
         nowIso,
+        field.basis,
+        field.status === 'known' ? nowIso : null,
       );
       continue;
     }
@@ -995,10 +1076,12 @@ function applyFacts(db: SqlDb, contactId: string, extraction: Extraction, source
       continue;
     }
     db.run(
-      `UPDATE facts SET value = ?, status = 'known', evidence = ?, source_event_id = ?, updated_at = ? WHERE contact_id = ? AND field_key = ?`,
+      `UPDATE facts SET value = ?, status = 'known', evidence = ?, source_event_id = ?, updated_at = ?, basis = ?, observed_at = ? WHERE contact_id = ? AND field_key = ?`,
       field.value,
       field.evidence,
       sourceEventId,
+      nowIso,
+      field.basis,
       nowIso,
       contactId,
       key,
@@ -1204,4 +1287,67 @@ function roleLabel(role: string): string {
 
 function numBool(value: unknown): boolean {
   return value === 1 || value === true || value === '1';
+}
+
+export function setSuppression(db: SqlDb, contactId: string, status: 'unknown' | 'ok_to_contact' | 'opted_out', now = new Date()): void {
+  const before = db.get(`SELECT suppression_status FROM contacts WHERE id = ?`, contactId);
+  db.run(`UPDATE contacts SET suppression_status = ?, updated_at = ? WHERE id = ?`, status, now.toISOString(), contactId);
+  audit(db, 'suppression_changed', contactId, 'contact', contactId, { status }, { status: before ? text(before, 'suppression_status') : null });
+}
+
+function recordDeliveryBlock(db: SqlDb, draftId: string, reason: string): void {
+  const existing = db.get(`SELECT id FROM jobs WHERE dedupe_key = 'delivery-blocked'`);
+  const now = new Date().toISOString();
+  if (existing) {
+    db.run(`UPDATE jobs SET status = 'failed', detail = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?`, reason, now, text(existing, 'id'));
+    return;
+  }
+  db.run(
+    `INSERT INTO jobs (id, kind, status, title, detail, attempts, max_attempts, dedupe_key, is_demo, created_at, updated_at)
+     VALUES (?, 'delivery', 'failed', 'Delivery blocked', ?, 1, 3, 'delivery-blocked', 0, ?, ?)`,
+    randomUUID(),
+    `${reason} Draft ${draftId} was not sent.`,
+    now,
+    now,
+  );
+}
+
+function audit(db: SqlDb, action: string, contactId: string | null, entityType: string, entityId: string | null, after: unknown, before?: unknown): void {
+  db.run(
+    `INSERT INTO audit_log (id, at, actor, action, contact_id, entity_type, entity_id, before_json, after_json)
+     VALUES (?, ?, 'Kyle Kleinman', ?, ?, ?, ?, ?, ?)`,
+    randomUUID(),
+    new Date().toISOString(),
+    action,
+    contactId,
+    entityType,
+    entityId,
+    before === undefined ? null : JSON.stringify(before),
+    JSON.stringify(after),
+  );
+}
+
+function displayBasis(row: Record<string, unknown>, now = new Date()): FactBasis {
+  const status = text(row, 'status');
+  if (status !== 'known') return 'missing';
+  const basis = text(row, 'basis') || 'said';
+  const observed = text(row, 'observed_at') || text(row, 'updated_at');
+  if ((basis === 'said' || basis === 'inferred') && observed) {
+    const age = now.getTime() - new Date(observed).getTime();
+    if (age > 14 * 24 * 60 * 60 * 1000) return 'stale';
+  }
+  if (basis === 'said' || basis === 'confirmed' || basis === 'inferred' || basis === 'missing' || basis === 'stale') return basis;
+  return 'said';
+}
+
+function healthItem(id: string, title: string, reason: string): AttentionItem {
+  return {
+    id,
+    contactId: null,
+    title,
+    reason,
+    nextStep: 'Use paste and copy until this connection is authorized.',
+    isDemo: false,
+    kind: 'system_health',
+  };
 }

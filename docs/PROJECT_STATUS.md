@@ -10,35 +10,45 @@ Cursor owns the code in `ops/`. The handoff for the next session is this file pl
 
 ## Built
 
-A local lead desk at `ops/`.
+Stage 1 of KyleOS Command, package name `kleinman-lead-desk`, at `ops/`.
 
-- Paste a lead or upload a screenshot.
-- Extract supported facts. Missing facts stay Data needed. Conflicts are kept.
-- Match on phone or email. Same name without a matching phone or email waits for a human decision.
-- Draft the next text in Kyle's voice, a buyer summary, a CRM note, and a follow up time.
-- Review queue. Approve saves the note and one follow up. It does not send.
-- Today screen: new leads, replies, appointments, overdue follow ups, milestones, drafts, failed automations.
-- Outbound pause defaults to on. No send workflow is authorized.
+- Paste an inquiry or upload a screenshot. Only visible facts are extracted.
+- Facts are labeled said, confirmed, inferred, missing, or stale. Financing is not invented. A requested showing is not stored as confirmed.
+- Match on phone or email. A name alone, including a similar name, does not merge.
+- SEND, NOTE, and NEXT on the review. The next action is stored on the contact.
+- Daily Command board: new inquiries, replies, appointments, overdue follow ups, milestones, drafts, failed automations, contacts with no next action, a blocked reply connector, and system health.
+- Kyle-only local sign-in. Default password `local-kyle` (`OPS_PASSWORD`). Live mode stays off.
+- Draft only. Opt-out blocks the draft. `sent_messages` stays empty. Matches and drafts are written to `audit_log`.
 - SQLite file, export, and a tested backup/restore.
-- 19 automated tests passing, plus a Chrome walkthrough of the real page.
+- DEMO seed is labeled. It is not a live CRM.
+- 25 automated tests passing, plus a Chrome walkthrough. Board picture: `docs/screenshots/command-board.png`.
 
 ## Verified
 
-`cd ops && npx tsc --noEmit` passed.
+```bash
+cd ops
+npx tsc --noEmit
+node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts
+```
 
-`node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts` passed, 19 of 19.
+Typecheck passed. Tests: 25 passed, 0 failed.
 
-Chrome walkthrough passed for banner, sample day, paste, draft, blocked send, saved note, search, and a 390px layout. Details are in `docs/TEST_RESULTS.md`.
+Chrome walkthrough passed for sign-in, the synthetic board, SEND / NOTE / NEXT, blocked send, saved note, no-next-action, search, a new paste, and a 390px layout. Details are in `docs/TEST_RESULTS.md`.
 
 ## Blocked
 
 - Redfin Partner Tools has no connected write API. The desk cannot update it. Kyle pastes the CRM note back himself.
-- No MLS or IDX credentials.
-- Gmail tools are connected in Cursor, but client and employer mail were not imported. Do not import them until Kyle names a permitted source.
+- No MLS or IDX feed. Listing status is not invented.
+- No ShowingTime API. Requested times stay unconfirmed.
+- Quo may be connected in another session. This desk does not send SMS. Live texting stays unauthorized.
+- Gmail tools were not used to import client or employer mail.
 - `mail.php` belongs to a different seller-lead site and is not connected.
+- Spanish drafts are not built. English drafts only.
 - OpenAI and Supabase are not configured and are not required.
 - No paid service was selected. Estimated cost of this release is $0.
 - Real client records were not loaded. DEMO rows are synthetic.
+- Seller CMA, investor math, and mass outreach were left out of this run.
+- The other Cursor OS agent was left running.
 
 ## Next
 
@@ -50,6 +60,7 @@ Chrome walkthrough passed for banner, sample day, paste, draft, blocked send, sa
 ```bash
 cd ops
 npm install
+npm run typecheck
 npm test
 npm start
 ```

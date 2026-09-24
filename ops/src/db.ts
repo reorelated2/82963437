@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { openSql, type SqlDb } from './sql.ts';
+import { openSql, text, type SqlDb } from './sql.ts';
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -183,6 +183,18 @@ CREATE TABLE IF NOT EXISTS authorizations (
   stop_conditions TEXT NOT NULL,
   authorized_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  at TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  contact_id TEXT,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  before_json TEXT,
+  after_json TEXT
+);
 `;
 
 export function openDatabase(path: string): SqlDb {
@@ -193,5 +205,17 @@ export function openDatabase(path: string): SqlDb {
   if (!paused) db.run(`INSERT INTO settings (key, value) VALUES ('outbound_paused', 'true')`);
   const limit = db.get(`SELECT value FROM settings WHERE key = 'spend_limit_usd'`);
   if (!limit) db.run(`INSERT INTO settings (key, value) VALUES ('spend_limit_usd', '0')`);
+  ensureColumn(db, 'facts', 'basis', `ALTER TABLE facts ADD COLUMN basis TEXT NOT NULL DEFAULT 'missing'`);
+  ensureColumn(db, 'facts', 'observed_at', `ALTER TABLE facts ADD COLUMN observed_at TEXT`);
+  ensureColumn(db, 'contacts', 'next_action', `ALTER TABLE contacts ADD COLUMN next_action TEXT`);
+  ensureColumn(db, 'contacts', 'next_action_due_at', `ALTER TABLE contacts ADD COLUMN next_action_due_at TEXT`);
+  ensureColumn(db, 'contacts', 'next_action_reason', `ALTER TABLE contacts ADD COLUMN next_action_reason TEXT`);
+  ensureColumn(db, 'contacts', 'next_action_owner', `ALTER TABLE contacts ADD COLUMN next_action_owner TEXT`);
   return db;
+}
+
+function ensureColumn(db: SqlDb, table: 'facts' | 'contacts', column: string, alter: string): void {
+  const rows = db.all(`PRAGMA table_info(${table})`);
+  if (rows.some((row) => text(row, 'name') === column)) return;
+  db.exec(alter);
 }

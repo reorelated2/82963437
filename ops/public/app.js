@@ -1,5 +1,6 @@
 const app = document.querySelector('#app');
 const state = {
+  authed: false,
   view: 'today',
   workspace: null,
   contact: null,
@@ -11,8 +12,22 @@ const state = {
   busy: false,
 };
 
-window.addEventListener('hashchange', route);
-route();
+window.addEventListener('hashchange', () => {
+  if (!state.authed) return;
+  route();
+});
+boot();
+
+async function boot() {
+  const session = await fetch('/api/session').then((response) => response.json());
+  state.authed = Boolean(session.ok);
+  if (!state.authed) {
+    state.view = 'login';
+    render();
+    return;
+  }
+  route();
+}
 
 function route() {
   const hash = location.hash || '#/today';
@@ -91,8 +106,8 @@ function top() {
   const header = el('header', { class: 'top' });
   header.append(
     el('div', { class: 'brand' }, [
-      el('h1', { text: 'Kleinman Desk' }),
-      el('p', { text: 'Miami Dade and Broward' }),
+      el('h1', { text: 'KyleOS Command' }),
+      el('p', { text: 'kleinman-lead-desk · Miami Dade and Broward' }),
     ]),
     el('p', { class: 'rule', text: 'Redfin Partner Tools stays the system of record. This desk prepares drafts and notes. It does not text, email, or update Redfin.' }),
   );
@@ -103,6 +118,7 @@ function main() {
   const node = el('main', { class: 'main' });
   if (state.notice) node.append(el('div', { class: 'notice', id: 'notice', text: state.notice }));
   if (state.error) node.append(el('div', { class: 'error', id: 'error', text: state.error }));
+  if (state.view === 'login') node.append(loginView());
   if (state.view === 'today') node.append(todayView());
   if (state.view === 'new') node.append(newLeadView());
   if (state.view === 'review') node.append(reviewView());
@@ -148,6 +164,9 @@ function todayView() {
     section('milestones', 'Upcoming milestones', data.milestones),
     section('drafts', 'Drafts waiting', data.drafts),
     section('failures', 'Failed automations', data.failedAutomations),
+    section('no-next', 'No next action', data.noNextAction),
+    section('replies-blocked', 'Recent replies', [data.replyConnector]),
+    section('system-health', 'System health', data.systemHealth, true),
   );
   wrap.append(sections);
   return wrap;
@@ -163,6 +182,7 @@ function section(id, title, items, wide = false) {
   for (const item of items) {
     const button = el('button', { class: 'item', type: 'button', onclick: () => openItem(item) });
     const titleRow = el('strong', { text: item.title });
+    titleRow.append(document.createTextNode(' '), el('span', { class: 'pill', text: 'Act' }));
     if (item.isDemo) titleRow.append(document.createTextNode(' '), el('span', { class: 'pill demo', text: 'DEMO' }));
     button.append(titleRow, el('span', { text: `${item.reason} ${item.nextStep}` }));
     card.append(button);
@@ -171,6 +191,12 @@ function section(id, title, items, wide = false) {
 }
 
 function openItem(item) {
+  if (item.kind === 'system_health' || item.kind === 'connector_blocked') {
+    state.notice = `${item.title}. ${item.reason} ${item.nextStep} No message was sent.`;
+    state.error = '';
+    render();
+    return;
+  }
   if (item.kind === 'failed_job') {
     post(`/api/jobs/${item.id}/acknowledge`).then(loadToday);
     return;
@@ -258,15 +284,34 @@ function reviewView() {
   wrap.append(el('p', { class: 'detail', text: payload.summary || payload.reason || '' }));
   if (payload.internalNote) wrap.append(el('section', { class: 'card' }, [el('h2', { text: 'Internal note' }), el('p', { text: payload.internalNote })]));
   const draftBody = (review.draft && review.draft.body) || payload.draftBody;
+  if (payload.fields) {
+    const facts = el('section', { class: 'card', id: 'fact-basis' });
+    facts.append(el('h2', { text: 'Said, confirmed, inferred, missing' }));
+    for (const fact of payload.fields) {
+      const row = el('div', { class: 'fact' });
+      row.append(el('b', { text: fact.label }), el('span', { class: 'pill', text: basisLabel(fact) }));
+      const value = fact.status === 'known' ? fact.value : fact.status === 'unclear' ? 'Unclear, not saved as fact' : 'Missing';
+      row.append(el('span', { class: fact.status === 'known' ? '' : 'needed', text: value }));
+      facts.append(row);
+    }
+    wrap.append(facts);
+  }
   if (draftBody) {
     wrap.append(el('section', { class: 'card' }, [
-      el('h2', { text: 'Exact message' }),
+      el('h2', { text: 'SEND' }),
       el('p', { class: 'message', id: 'draft-body', text: draftBody }),
       el('p', { class: 'empty', text: `To ${payload.recipient || (review.draft && review.draft.recipient) || 'Data needed'} by ${payload.channel || (review.draft && review.draft.channel) || 'text'}. Suggested time, not a scheduled send: ${(payload.followUp && payload.followUp.display) || 'not set'}.` }),
     ]));
   }
   if (payload.crmNote) {
-    wrap.append(el('section', { class: 'card' }, [el('h2', { text: 'CRM note' }), el('pre', { class: 'note', id: 'crm-note', text: payload.crmNote })]));
+    wrap.append(el('section', { class: 'card' }, [el('h2', { text: 'NOTE' }), el('pre', { class: 'note', id: 'crm-note', text: payload.crmNote })]));
+  }
+  if (payload.followUp) {
+    wrap.append(el('section', { class: 'card', id: 'next-action' }, [
+      el('h2', { text: 'NEXT' }),
+      el('p', { text: payload.followUp.action }),
+      el('p', { class: 'empty', text: `${payload.followUp.display}. ${payload.followUp.reason}` }),
+    ]));
   }
   if (payload.warnings && payload.warnings.length) {
     wrap.append(el('section', { class: 'card' }, [el('h2', { text: 'Needs a look' }), ...payload.warnings.map((warning) => el('p', { text: warning }))]));
@@ -322,7 +367,8 @@ function contactView() {
   for (const fact of contact.facts) {
     const row = el('div', { class: 'fact' });
     row.append(el('b', { text: fact.label }));
-    const value = fact.status === 'known' ? fact.value : fact.status === 'unclear' ? 'Unclear, kept for review' : 'Data needed';
+    const value = fact.status === 'known' ? fact.value : fact.status === 'unclear' ? 'Unclear, kept for review' : 'Missing';
+    row.append(el('span', { class: 'pill', text: basisLabel(fact) }));
     row.append(el('span', { class: fact.status === 'known' ? '' : 'needed', text: value }));
     facts.append(row);
   }
@@ -364,6 +410,47 @@ function contactView() {
     ]));
   }
   return wrap;
+}
+
+function loginView() {
+  const card = el('section', { class: 'card stack' });
+  const input = el('input', { id: 'login-password', type: 'password', placeholder: 'Local password' });
+  card.append(
+    el('h2', { text: 'Sign in' }),
+    el('p', { class: 'empty', text: 'Kyle only. The local password is in the setup guide. Live sending stays off.' }),
+    el('label', { for: 'login-password', text: 'Password' }),
+    input,
+    el('div', { class: 'actions' }, [
+      el('button', { class: 'primary', id: 'login-submit', type: 'button', text: 'Open the board', onclick: () => signIn(input) }),
+    ]),
+  );
+  return card;
+}
+
+async function signIn(input) {
+  const response = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: input.value }),
+  });
+  if (!response.ok) {
+    state.error = 'That password did not match.';
+    render();
+    return;
+  }
+  state.authed = true;
+  state.error = '';
+  location.hash = '#/today';
+  await loadToday();
+}
+
+function basisLabel(fact) {
+  if (fact.status === 'unclear') return 'Unclear';
+  if (fact.basis === 'confirmed') return 'Confirmed';
+  if (fact.basis === 'inferred') return 'Inferred';
+  if (fact.basis === 'stale') return 'Stale';
+  if (fact.basis === 'said') return 'Said';
+  return 'Missing';
 }
 
 function searchView() {

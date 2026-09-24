@@ -8,7 +8,7 @@ npx tsc --noEmit
 node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts
 ```
 
-Result: typecheck passed. 19 tests passed, 0 failed.
+Result: typecheck passed. 25 tests passed, 0 failed.
 
 | Check | Result |
 | --- | --- |
@@ -27,7 +27,15 @@ Result: typecheck passed. 19 tests passed, 0 failed.
 | `$650K` | Passed. |
 | Follow up calendar | Passed. Thursday 11:00 AM ET follows up Friday 9:00 AM ET. Friday evening follows up Monday 9:00 AM ET. |
 | Backup restore | Passed. |
-| Sample workspace | Passed. Each attention group has a DEMO row. Today's sample appointment is labeled not confirmed. |
+| Sample workspace | Passed. Each attention group has a DEMO row. Today's sample appointment is labeled not confirmed. Pat Nguyen has no next action. Recent replies say the connector is blocked. MLS and ShowingTime are listed under system health. |
+| Ambiguous extract | Passed. An unclear name plus two phones creates no contact and no draft. |
+| Wrong-match risk | Passed. Nate Alvarez and Nathan Alvarez with different phones stay two contacts. A same name without a matching phone or email is not merged. |
+| Duplicate inquiry | Passed. The same paste does not add a second contact, draft, or task. |
+| Missing financing | Passed. A mention of financing stays data needed. A stated pre-approval is Said, not Confirmed. |
+| Showing requested is not confirmed | Passed. The draft does not say the showing is confirmed. The next action says the time is not confirmed. |
+| Reply mid-sequence | Passed. A later message on the same phone does not restart with Hey. The next action is to answer the latest message. |
+| Opt out | Passed. The draft is blocked, send stays empty, and the audit log records the block. |
+| Eastern time after the fall clock change | Passed. Friday 2026-11-06 6:00 PM EST follows up Monday 2026-11-09 9:00 AM EST. |
 
 ## Not tested with real clients
 
@@ -35,8 +43,8 @@ No real Redfin export, Gmail import, or MLS feed was used. Sample people are lab
 
 ## Browser
 
-Checked in Chrome on 2026-09-24 against `http://127.0.0.1:8787`.
+Checked in Chrome on 2026-09-24 against `http://127.0.0.1:8787` after signing in with the local password.
 
-Passed: the Redfin system-of-record banner, a sample day with DEMO labels, a pasted Riley Chen lead, the exact draft sentence for that record, Data needed on the CRM note, a requested 5:30 that stayed unconfirmed, Try to send blocked with "Nothing was sent.", the note visible on the client, search by phone, and a 390px-wide layout with the nav at the bottom.
+Passed: rejected wrong password, KyleOS Command board, Load sample day with DEMO labels, Pat Nguyen under No next action, connector-blocked replies, ShowingTime Act explaining the block without sending, Nate Alvarez Act opening SEND / NOTE / NEXT, financing labeled Said, requested 5:30 left unconfirmed, Try to send blocked with "Nothing was sent.", Save note and follow up landing on Nate with the unsent note, Pat Nguyen Act opening that client, search by phone, a pasted Riley Chen Hollywood inquiry, and a 390px-wide layout with the nav at the bottom.
 
-Screenshots from that pass: today, review, client, and the phone-width today screen.
+Board screenshot with synthetic data: `docs/screenshots/command-board.png`. Phone-width board: `docs/screenshots/command-board-mobile.png`.
