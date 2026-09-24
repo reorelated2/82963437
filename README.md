@@ -1,3 +1,39 @@
+# KyleOS Command
+
+The Stage 1 app is the local package `kleinman-lead-desk` in `ops/`. The screen title is KyleOS Command. It turns a pasted inquiry or a screenshot into visible facts only, matches an existing contact by email or phone, and puts SEND, NOTE, and NEXT on the Daily Command board. It does not send texts or email. Redfin Partner Tools stays the system of record.
+
+Sample people are labeled DEMO. They are not a live CRM.
+
+Start here:
+
+1. [Setup](docs/SETUP.md)
+2. [Daily guide](docs/DAILY_GUIDE.md)
+3. [Project status](docs/PROJECT_STATUS.md)
+
+```bash
+cd ops
+npm install
+npm run typecheck
+npm test
+npm start
+```
+
+`npm test` runs:
+
+```bash
+node --experimental-strip-types --experimental-sqlite --test test/*.ts
+```
+
+Latest result on 2026-09-24: typecheck passed. `npm test` reported 25 passed, 0 failed.
+
+Then open `http://127.0.0.1:8787`. Sign in with the local password from [Setup](docs/SETUP.md). The default is `local-kyle`. Click **Load sample day** to see the board. Screenshot of that synthetic board: [docs/screenshots/command-board.png](docs/screenshots/command-board.png).
+
+Still blocked: Redfin write-back, MLS, ShowingTime, live Quo SMS, Gmail import, and Spanish drafts. Details are in [Project status](docs/PROJECT_STATUS.md).
+
+# Older scaffold
+
+The rest of this repository is an earlier South Florida Buyer Command Center (Expo + Node + Playwright). It is not the operating system. Do not use its scripted strategy copy for client messages. The lead desk voice lives in `ops/src/voice.ts`.
+
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 
 This repository now includes a production-oriented scaffold for a **Redfin-agent consultation app** with:

@@ -1,0 +1,9 @@
+node_modules/
+ops/data/*.sqlite
+ops/data/*.sqlite-*
+ops/data/uploads/
+ops/data/backups/
+ops/data/*.png
+*.log
+.env
+.env.*
