@@ -47,9 +47,14 @@ Chrome opened `http://127.0.0.1:8080` on a phone-sized window and a desktop wind
 - "I will send this myself" showed "Saved. Nothing was sent." The draft stayed unsent.
 - Search for Lena found Lena Ortiz.
 
-## Browser for this revision
+## Browser
 
-The automated checks above cover the new rules. The earlier Chrome pass (empty desk, demo Today, Lena Ortiz draft, approve without sending, search) is still the last full screen recording. Re-check the page after starting the desk if this section has not been replaced with a dated pass of SEND, NOTE, NEXT, and the weekly card.
+2026-09-24, Chrome, phone size and a 1280px window, against the running desk at `http://127.0.0.1:8080`.
+
+- Today showed the weekly card, the $250K planning-target sentence, "Data needed" for pay and held appointments, Most likely to move, Financing still unknown, and No next action. Console errors: none.
+- A pasted Brickell lead for Camila Vega, marked Spanish, opened SEND / NOTE / NEXT. SEND was: "Hola Camila, soy Kyle Kleinman con Redfin. Vi tu solicitud para la propiedad en Brickell. ¿Te funciona 6:00 si lo puedo confirmar?" NOTE said the showing was not confirmed, the language was Spanish as stated, and the budget was $800K.
+- The search stage button saved. "I will send this myself" showed "Saved. Nothing was sent."
+- The earlier pass (empty desk, demo day, Lena Ortiz, search) still stands for those screens.
 
 ## Not tested
 

@@ -14,7 +14,7 @@ Main code: `backend/src/os/`. Page: `backend/public/`. Decisions: `docs/DECISION
 
 `cd backend && npm test` — 19 passed. `npx tsc --noEmit` passed. Synthetic data only. No message was sent.
 
-Browser check of this revision is in `docs/TEST_RESULTS.md` after the page was exercised. If that section is still the earlier pass, treat the automated tests as the evidence for the new rules and the browser note as the previous screen check.
+Chrome at `http://127.0.0.1:8080` opened Today, pasted a Spanish Brickell lead, showed SEND / NOTE / NEXT, saved the search stage, and confirmed approval does not send. Details are in `docs/TEST_RESULTS.md`.
 
 ## BLOCKED
 
