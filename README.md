@@ -1,3 +1,15 @@
+# South Florida Buyer Command Center
+
+This repository is the consult, market, and MLS-helper app. It is not the inquiry command board.
+
+The other agent owns Stage 1 (paste a lead, then SEND / NOTE / NEXT). That boundary is in [docs/HANDOFF_BOUNDARY.md](docs/HANDOFF_BOUNDARY.md). The local lead-desk experiment under `backend/src/os` is not mounted. Leave `ENABLE_LEAD_DESK` unset.
+
+```bash
+cd backend && npm install && npm run dev
+```
+
+Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board. `GET /mls/hiram-zone` is a labeled DEMO seed. Nothing on this server sends a client message.
+
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 
 This repository now includes a production-oriented scaffold for a **Redfin-agent consultation app** with:
