@@ -1,0 +1,18 @@
+{
+  "name": "kleinman-lead-desk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local review desk for Kyle Kleinman's new-lead to follow-up workflow.",
+  "scripts": {
+    "start": "node --experimental-strip-types --experimental-sqlite src/server.ts",
+    "test": "node --experimental-strip-types --experimental-sqlite --test test/*.ts",
+    "typecheck": "tsc --noEmit",
+    "backup": "node --experimental-strip-types --experimental-sqlite src/backup-cli.ts backup",
+    "restore": "node --experimental-strip-types --experimental-sqlite src/backup-cli.ts restore"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,3 +1,26 @@
+# Kleinman Desk
+
+The working app is the local lead desk in `ops/`. It turns a pasted lead or a screenshot into a reviewable summary, a text draft in Kyle Kleinman's voice, a CRM note, and a follow up. It does not send messages and it does not replace Redfin Partner Tools.
+
+Start here:
+
+1. [Setup](docs/SETUP.md)
+2. [Daily guide](docs/DAILY_GUIDE.md)
+3. [Project status](docs/PROJECT_STATUS.md)
+
+```bash
+cd ops
+npm install
+npm test
+npm start
+```
+
+Then open `http://127.0.0.1:8787`.
+
+# Older scaffold
+
+The rest of this repository is an earlier South Florida Buyer Command Center (Expo + Node + Playwright). It is not the operating system. Do not use its scripted strategy copy for client messages. The lead desk voice lives in `ops/src/voice.ts`.
+
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 
 This repository now includes a production-oriented scaffold for a **Redfin-agent consultation app** with:
