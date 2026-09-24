@@ -1,3 +1,21 @@
+# Kleinman Desk
+
+Local working desk for Kyle Kleinman, Redfin, Miami-Dade and Broward.
+
+Start here if you are not a developer: [docs/SETUP.md](docs/SETUP.md), then [docs/DAILY_GUIDE.md](docs/DAILY_GUIDE.md).
+
+The first working workflow is a new lead or screenshot, turned into a summary, a text draft, a CRM note, and a follow up. Nothing is sent. Redfin stays the system of record. Status for the next coding session: [docs/STATUS.md](docs/STATUS.md).
+
+```bash
+cd backend && npm install && npm run dev
+```
+
+Open `http://127.0.0.1:8080`.
+
+## Earlier consultation scaffold
+
+The rest of this repository is an older Expo + Node consultation app. It is still here. Its Redfin page collector does not start unless `RUN_REDFIN_COLLECTOR=true`.
+
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 
 This repository now includes a production-oriented scaffold for a **Redfin-agent consultation app** with:

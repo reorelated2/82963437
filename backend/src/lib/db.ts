@@ -1,10 +1,18 @@
-import { createClient } from '@supabase/supabase-js';
-import type { MarketRow } from '../types';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { MarketRow } from '../types/index.js';
 
-const supabase = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_ROLE_KEY ?? '');
+let client: SupabaseClient | null = null;
+
+function supabase(): SupabaseClient {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Supabase is not configured. Kleinman Desk does not use it.');
+  }
+  if (!client) client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return client;
+}
 
 export async function upsertMarkets(rows: MarketRow[]): Promise<void> {
-  await supabase.from('markets').upsert(
+  await supabase().from('markets').upsert(
     rows.map((row) => ({
       ...row,
       last_updated: new Date().toISOString(),
@@ -14,7 +22,7 @@ export async function upsertMarkets(rows: MarketRow[]): Promise<void> {
 }
 
 export async function getMarket(city: string): Promise<MarketRow | null> {
-  const { data } = await supabase
+  const { data } = await supabase()
     .from('markets')
     .select('*')
     .eq('city', city)
@@ -25,7 +33,7 @@ export async function getMarket(city: string): Promise<MarketRow | null> {
 }
 
 export async function saveClient(payload: { answers: unknown; leadLabel: string; readinessPercent: number; transactionPlan: unknown }): Promise<string> {
-  const { data, error } = await supabase
+  const { data, error } = await supabase()
     .from('clients')
     .insert({
       answers_json: payload.answers,
