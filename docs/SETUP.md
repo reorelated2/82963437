@@ -1,5 +1,9 @@
 # Setup
 
+This file used to start the lead desk. That board is no longer the product in this repo. See `docs/HANDOFF_BOUNDARY.md`. `npm run dev` now starts the Buyer Command Center. Do not set `ENABLE_LEAD_DESK`.
+
+# Setup (lead-desk experiment, unmounted)
+
 You do this on your own computer, in Cursor, or in any folder that has this project. The desk stays on that computer. It does not go live on the internet.
 
 ## 1. Install Node

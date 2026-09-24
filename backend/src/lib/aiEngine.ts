@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 
 function client(): OpenAI {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not set. Kleinman Desk drafts do not use OpenAI.');
+    throw new Error('OPENAI_API_KEY is not set. Strategy generation is not connected.');
   }
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }

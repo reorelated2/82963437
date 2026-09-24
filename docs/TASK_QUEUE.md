@@ -9,8 +9,9 @@ Grok bot: not present. See `docs/INTEGRATIONS.md`. Tasks that would have gone to
 | ID | Task | Owner | State |
 | --- | --- | --- | --- |
 | Q1 | Requirements, voice, and acceptance rules for release 1 | Grok in Cursor | Done in `docs/REQUIREMENTS.md` |
-| Q2 | Local desk: intake, review, drafts, daily screen, backup, Spanish, opt-out, source history | Cursor | Done in this branch. 19 tests passing |
-| Q3 | Kyle runs setup on his computer and opens the desk | Kyle (manual) | Waiting. Steps in `docs/SETUP.md` |
+| Q2 | Local desk experiment | This repo | Stopped as the product surface. Code remains unmounted. The other agent owns Stage 1. |
+| Q3 | Kyle uses the inquiry board | Other agent | Not this repo. Do not send him here for SEND/NOTE/NEXT. |
+| Q11 | Keep consult, markets, and MLS helpers; label the Hiram seed as demo | This repo | In progress. Boundary in `docs/HANDOFF_BOUNDARY.md`. |
 | Q4 | Decide whether any Redfin export may be copied into the desk | Kyle (manual) | Blocked. Do not import mail until he says which export is allowed |
 | Q5 | Install Tesseract if screenshot reading is wanted | Kyle (manual) | Optional. Paste still works without it |
 | Q6 | Contact import and reactivation | Cursor, after Q4 | Not started |

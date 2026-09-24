@@ -1,5 +1,26 @@
 # Test results
 
+## This lane, 2026-09-24 (Buyer Command Center)
+
+Command, from `backend`:
+
+```bash
+npx tsc --noEmit && npm test
+```
+
+Result: typecheck passed. 22 passed, 0 failed. That count includes 3 checks for this product and 19 older lead-desk unit checks. The lead desk is not what this server serves.
+
+Live process on `127.0.0.1:8080` after reload:
+
+- `GET /` returned product `South Florida Buyer Command Center` and `leadDesk` "Not mounted".
+- `GET /health` returned `leadDeskMounted: false`.
+- `GET /api/os/workspace` returned HTTP 404.
+- `GET /mls/hiram-zone` returned `demo: true`, notice "DEMO seed. These are not live MLS listings...", totals active 18 of 20, under contract filtered out 2.
+
+Not a deployment. Supabase and OpenAI were not called. No client message was sent.
+
+## Earlier lead-desk checks (code still in the repo, not mounted)
+
 Date: 2026-09-24. Data: synthetic only. No real client was imported. No message was sent. No paid API was called.
 
 Command, from `backend`:

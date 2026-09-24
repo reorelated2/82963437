@@ -5,7 +5,7 @@ let client: SupabaseClient | null = null;
 
 function supabase(): SupabaseClient {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Supabase is not configured. Kleinman Desk does not use it.');
+    throw new Error('Supabase is not configured. Market and client routes need SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
   }
   if (!client) client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   return client;

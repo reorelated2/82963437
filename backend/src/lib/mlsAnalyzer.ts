@@ -26,6 +26,8 @@ export interface RankedListing extends MlsListing {
 }
 
 export interface AnalyzerResult {
+  demo: boolean;
+  notice: string;
   totals: {
     allListings: number;
     inZoneAndBudget: number;
@@ -124,6 +126,8 @@ export function analyzeMlsFeeds(feeds: MlsListing[][], config: Partial<AnalyzerC
   const ranked = active.map(toRanked).sort((a, b) => b.score - a.score || a.listPrice - b.listPrice);
 
   return {
+    demo: false,
+    notice: "Caller-supplied listings. This is not a live MLS connection.",
     totals: {
       allListings: merged.length,
       inZoneAndBudget: inZoneAndBudget.length,
@@ -159,5 +163,10 @@ const HIRAM_ZONE_SEED: MlsListing[] = [
 ];
 
 export function getHiramSeedAnalysis(): AnalyzerResult {
-  return analyzeMlsFeeds([HIRAM_ZONE_SEED]);
+  const analysis = analyzeMlsFeeds([HIRAM_ZONE_SEED]);
+  return {
+    ...analysis,
+    demo: true,
+    notice: "DEMO seed. These are not live MLS listings and must not be reported as current inventory.",
+  };
 }

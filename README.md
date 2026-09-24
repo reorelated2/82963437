@@ -1,20 +1,14 @@
-# Kleinman Desk
+# South Florida Buyer Command Center
 
-Local working desk for Kyle Kleinman, Redfin, Miami-Dade and Broward.
+This repository is the consult, market, and MLS-helper app. It is not the inquiry command board.
 
-Start here if you are not a developer: [docs/SETUP.md](docs/SETUP.md), then [docs/DAILY_GUIDE.md](docs/DAILY_GUIDE.md).
-
-The first working workflow is a new lead or screenshot, turned into a summary, a text draft, a CRM note, and a follow up. Nothing is sent. Redfin stays the system of record. Status for the next coding session: [docs/STATUS.md](docs/STATUS.md).
+The other agent owns Stage 1 (paste a lead, then SEND / NOTE / NEXT). That boundary is in [docs/HANDOFF_BOUNDARY.md](docs/HANDOFF_BOUNDARY.md). The local lead-desk experiment under `backend/src/os` is not mounted. Leave `ENABLE_LEAD_DESK` unset.
 
 ```bash
 cd backend && npm install && npm run dev
 ```
 
-Open `http://127.0.0.1:8080`.
-
-## Earlier consultation scaffold
-
-The rest of this repository is an older Expo + Node consultation app. It is still here. Its Redfin page collector does not start unless `RUN_REDFIN_COLLECTOR=true`.
+Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board. `GET /mls/hiram-zone` is a labeled DEMO seed. Nothing on this server sends a client message.
 
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 

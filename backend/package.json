@@ -7,7 +7,7 @@
     "dev": "NODE_OPTIONS='--experimental-sqlite' tsx watch src/server.ts",
     "start": "node --experimental-sqlite --enable-source-maps dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-sqlite --import tsx --test src/os/workflow.test.ts"
+    "test": "node --experimental-sqlite --import tsx --test src/lib/mlsAnalyzer.test.ts src/commandCenter.test.ts src/os/workflow.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

@@ -1,5 +1,9 @@
 # Daily use
 
+This guide describes the unmounted lead-desk experiment. It is not the product served at `http://127.0.0.1:8080`. The other agent owns the inquiry command board. See `docs/HANDOFF_BOUNDARY.md`.
+
+# Daily use (lead-desk experiment, unmounted)
+
 Open `http://127.0.0.1:8080` after the desk is running. See `docs/SETUP.md` if the page does not load.
 
 ## Today

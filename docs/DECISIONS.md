@@ -4,7 +4,8 @@ Updated: 2026-09-24. These are the choices already made for the first working de
 
 | Decision | Why |
 | --- | --- |
-| One local Node process, SQLite, and a page at `http://127.0.0.1:8080` | Smallest setup that stores records, survives a restart, and does not need a paid account. |
+| This repo stays the Buyer Command Center. Stage 1 SEND/NOTE/NEXT is the other agent's product. | Kyle kept both agents. `ENABLE_LEAD_DESK` stays unset so this server does not compete as the CRM. See `docs/HANDOFF_BOUNDARY.md`. |
+| One local Node process, SQLite, and a page at `http://127.0.0.1:8080` | Smallest setup that stores records, survives a restart, and does not need a paid account. The page is no longer mounted. |
 | Redfin stays the system of record | This desk holds working copies and notes to paste. It does not write to Redfin. |
 | There is no separate Grok bot | This session is Grok inside Cursor. It can edit this repo. It cannot operate Kyle's computer, log into Redfin, or message another Cursor window. |
 | Drafts do not send | There is no send route. Approving a draft sets it to approved and leaves `sent_at` empty. Outbound pause defaults to on. Spending limit defaults to $0. |
