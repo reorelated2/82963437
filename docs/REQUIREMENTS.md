@@ -33,7 +33,9 @@ Short, natural, confident, warm, direct. One purpose. Usually one question. No c
 
 ## Daily screen
 
-The opening screen answers who needs attention, why, and what to do next. It lists failed automations, overdue follow ups, new leads, replies, drafts, today, and upcoming milestones.
+The opening screen answers who needs attention, who is most likely to move, what comes next, and which action to take today. It lists failed automations, overdue follow ups, new leads, people most likely to move, replies, drafts, today, upcoming milestones, financing still unknown, and people with no next action. Demo records are counted apart from live records. Income stays "Data needed" until compensation, expenses, and taxes are supplied. The $250K net figure is a planning target, not a forecast.
+
+The client page labels the package SEND, NOTE, and NEXT. Spanish is used only when the client stated that preference. An opt-out stops drafts and follow ups for that person and does not change anyone else in the household. The original lead source is kept when a later source appears.
 
 ## Every feature
 

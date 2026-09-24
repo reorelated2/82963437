@@ -6,7 +6,7 @@ import { eventHashSource, extractLead, phoneKey } from "./extract.js";
 import { integrationMatrix } from "./integrations.js";
 import { readScreenshot } from "./ocr.js";
 import { etClock, etParts, formatEt, sameEtDay, suggestFollowUp } from "./time.js";
-import type { ExtractedLead, IntakeResult, Settings, Workspace } from "./types.js";
+import type { AttentionItem, ExtractedLead, IntakeResult, Settings, Workspace } from "./types.js";
 import { buyerSummary, crmNote, draftClientMessage, internalNote, summaryLine } from "./voice.js";
 
 const NATE_DEMO = `Name: Nate Alvarez
@@ -49,12 +49,17 @@ export interface Desk {
       stage: string;
       areas: string | null;
       leadSource: string | null;
+      language: string | null;
+      suppressed: boolean;
+      householdId: string | null;
+      priorityReason: string | null;
     };
+    attributions: { source: string; at: string; original: boolean }[];
     messages: { id: string; body: string; status: string; sentAt: string | null; contactId: string; recipient: string | null; purpose: string; context: string; scheduledFor: string | null; channel: string }[];
     notes: { id: string; body: string; contactId: string }[];
     tasks: { id: string; title: string; detail: string | null; dueAt: string | null; status: string; kind: string }[];
     showings: { requestedTime: string | null; availableTime: string | null; confirmedTime: string | null; status: string }[];
-    facts: { field: string; value: string | null; status: string }[];
+    facts: { field: string; value: string | null; status: string; origin: string }[];
     conflicts: { field: string; value: string | null; status: string }[];
     activity: { eventType: string; payload: string; createdAt: string }[];
   } | null;
@@ -63,6 +68,7 @@ export interface Desk {
   dismissReview(id: string): void;
   approveDraft(id: string): { sent: false; status: string };
   completeTask(id: string): void;
+  setStage(id: string, stage: string): void;
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
   queueOutbound(messageId: string): { sent: false; job: { id: string; status: string; lastError: string | null } };
@@ -206,6 +212,20 @@ export function openDesk(dbPath = dataFile()): Desk {
           // Same as phone.
         }
       }
+      if (!unclear && lead.leadSource) store.rememberSource(randomUUID(), contact.id, lead.leadSource, createdAt);
+      if (!unclear && lead.language) store.setLanguageIfEmpty(contact.id, lead.language);
+      if (!unclear && lead.householdName) {
+        const existingHousehold = store.householdByName(lead.householdName);
+        const householdId = existingHousehold?.id ?? randomUUID();
+        if (!existingHousehold) store.insertHousehold(householdId, lead.householdName, createdAt);
+        store.linkHousehold(contact.id, householdId);
+      }
+      if (!unclear && lead.optOut) store.suppress(contact.id, "They asked not to be contacted.");
+      contact = store.contact(contact.id) ?? contact;
+      if (!createdContact && !unclear) {
+        store.completeOpenFollowUps(contact.id);
+        store.cancelOpenDrafts(contact.id);
+      }
 
       store.insertSource({
         id: sourceId,
@@ -220,7 +240,7 @@ export function openDesk(dbPath = dataFile()): Desk {
       });
 
       for (const fact of factRows(lead, unclear)) {
-        store.insertFact(randomUUID(), contact.id, fact.field, fact.value, fact.status, sourceId, createdAt);
+        store.insertFact(randomUUID(), contact.id, fact.field, fact.value, fact.status, sourceId, createdAt, fact.origin);
       }
       for (const conflict of conflicts) {
         store.insertFact(randomUUID(), contact.id, conflict.field, `${conflict.existing} | incoming: ${conflict.incoming}`, "conflict", sourceId, createdAt);
@@ -246,7 +266,8 @@ export function openDesk(dbPath = dataFile()): Desk {
       }
 
       const follow = suggestFollowUp(input.now, Boolean(lead.requestedShowing || lead.availableShowing) && !lead.confirmedShowing);
-      const draft = unclear ? null : draftClientMessage(lead);
+      const blocked = unclear || lead.optOut || contact.suppressed === 1;
+      const draft = blocked ? null : draftClientMessage(lead);
       const noteBody = unclear
         ? `${input.failure ?? "Screenshot text is unclear. Nothing below is confirmed."}\n\nUnclear reading:\n${input.rawText.slice(0, 2000)}`
         : crmNote(lead, follow.label, input.isDemo || contact.is_demo === 1);
@@ -264,18 +285,20 @@ export function openDesk(dbPath = dataFile()): Desk {
             createdAt,
           })
         : null;
-      const taskTitle = unclear
-        ? "Reread this screenshot before texting"
-        : lead.conversation === "continuing"
-          ? `Reply to ${contact.display_name}`
-          : `Follow up with ${contact.display_name}`;
+      const taskTitle = lead.optOut || contact.suppressed === 1
+        ? "Do not message. They opted out."
+        : unclear
+          ? "Reread this screenshot before texting"
+          : lead.conversation === "continuing"
+            ? `Reply to ${contact.display_name}`
+            : `Follow up with ${contact.display_name}`;
       const taskId = ensureTask(store, {
         contactId: contact.id,
         sourceId,
         title: taskTitle,
-        detail: `${follow.label} Nothing is sent automatically.`,
-        dueAt: unclear ? createdAt : follow.dueAt,
-        kind: unclear ? "review" : lead.conversation === "continuing" ? "reply" : "follow_up",
+        detail: lead.optOut || contact.suppressed === 1 ? "Permission withdrawn. No draft was created." : `${follow.label} Nothing is sent automatically.`,
+        dueAt: unclear || lead.optOut || contact.suppressed === 1 ? null : follow.dueAt,
+        kind: lead.optOut || contact.suppressed === 1 ? "suppression" : unclear ? "review" : lead.conversation === "continuing" ? "reply" : "follow_up",
         createdAt,
       });
       const reviewId = randomUUID();
@@ -342,7 +365,7 @@ export function openDesk(dbPath = dataFile()): Desk {
         followUp: {
           id: taskId,
           title: taskTitle,
-          dueAt: unclear ? createdAt : follow.dueAt,
+          dueAt: lead.optOut || contact.suppressed === 1 ? "" : unclear ? createdAt : follow.dueAt,
           detail: `${follow.label} Nothing is sent automatically.`,
         },
         showing: {
@@ -440,8 +463,17 @@ export function openDesk(dbPath = dataFile()): Desk {
           demo: contact.is_demo === 1,
           stage: contact.stage,
           areas: contact.preferred_areas,
-          leadSource: contact.lead_source,
+          leadSource: contact.original_lead_source ?? contact.lead_source,
+          language: contact.preferred_language,
+          suppressed: contact.suppressed === 1,
+          householdId: contact.household_id,
+          priorityReason: movementReason(contact.timeline, file.showings[0] as { requested_time?: string | null; confirmed_time?: string | null } | undefined),
         },
+        attributions: store.attributions(contact.id).map((row) => ({
+          source: row.source,
+          at: row.observed_at,
+          original: row.is_original === 1,
+        })),
         messages: file.messages.map((message) => ({
           id: String(message.id),
           body: String(message.body),
@@ -477,6 +509,7 @@ export function openDesk(dbPath = dataFile()): Desk {
           field: String(fact.field),
           value: (fact.value as string | null) ?? null,
           status: String(fact.status),
+          origin: String(fact.origin ?? "said"),
         })),
         conflicts: file.facts
           .filter((fact) => fact.status === "conflict")
@@ -521,6 +554,14 @@ export function openDesk(dbPath = dataFile()): Desk {
 
     completeTask(id) {
       store.completeTask(id);
+    },
+
+    setStage(id: string, stage: string) {
+      const allowed = ["new", "qualifying", "consultation", "search", "showing", "offer", "under_contract", "closing", "past", "paused"];
+      if (!allowed.includes(stage)) throw new Error("That stage is not on the buyer path.");
+      if (!store.contact(id)) throw new Error("That client is not on this desk.");
+      store.setStage(id, stage, nowIso());
+      store.insertActivity(randomUUID(), id, "stage", { stage }, nowIso());
     },
 
     getSettings: settings,
@@ -788,8 +829,12 @@ function contactFromLead(id: string, lead: ExtractedLead, isDemo: boolean, creat
     deal_breakers: unclear ? null : lead.dealBreakers,
     preferred_areas: unclear ? null : lead.areas,
     is_demo: isDemo ? 1 : 0,
-    suppressed: 0,
-    suppression_reason: null,
+    suppressed: !unclear && lead.optOut ? 1 : 0,
+    suppression_reason: !unclear && lead.optOut ? "They asked not to be contacted." : null,
+    preferred_language: unclear ? null : lead.language,
+    relationship_type: "buyer",
+    household_id: null,
+    original_lead_source: unclear ? null : lead.leadSource,
     created_at: createdAt,
     updated_at: createdAt,
   };
@@ -810,7 +855,6 @@ function mergeLead(contact: ContactRow, lead: ExtractedLead, conflicts: { field:
   take("name", contact.display_name, lead.name, "display_name");
   take("phone", contact.phone, lead.phone, "phone");
   take("email", contact.email, lead.email, "email");
-  take("leadSource", contact.lead_source, lead.leadSource, "lead_source");
   take("assignedAgent", contact.assigned_agent, lead.assignedAgent, "assigned_agent");
   take("propertyUse", contact.property_use, lead.propertyUse, "property_use");
   take("financing", contact.financing_status, lead.financing, "financing_status");
@@ -831,8 +875,8 @@ function mergeLead(contact: ContactRow, lead: ExtractedLead, conflicts: { field:
   return patch;
 }
 
-function factRows(lead: ExtractedLead, unclear: boolean): { field: string; value: string | null; status: string }[] {
-  const rows: { field: string; value: string | null; status: string }[] = [
+function factRows(lead: ExtractedLead, unclear: boolean): { field: string; value: string | null; status: string; origin: string }[] {
+  const rows: { field: string; value: string | null; status: string; origin: string }[] = [
     { field: "name", value: lead.name, status: lead.fieldStatus.name ?? "data_needed" },
     { field: "phone", value: lead.phone, status: lead.fieldStatus.phone ?? "data_needed" },
     { field: "email", value: lead.email, status: lead.fieldStatus.email ?? "data_needed" },
@@ -850,10 +894,20 @@ function factRows(lead: ExtractedLead, unclear: boolean): { field: string; value
     { field: "timeline", value: lead.timeline, status: lead.fieldStatus.timeline ?? "data_needed" },
     { field: "motivation", value: lead.motivation, status: lead.fieldStatus.motivation ?? "data_needed" },
     { field: "mustHaves", value: lead.mustHaves, status: lead.fieldStatus.mustHaves ?? "data_needed" },
-    { field: "dealBreakers", value: lead.dealBreakers, status: lead.fieldStatus.dealBreakers ?? "data_needed" },
-  ];
+    { field: "dealBreakers", value: lead.dealBreakers, status: lead.fieldStatus.dealBreakers ?? "data_needed", origin: "" },
+  ].map((row) => ({ ...row, origin: originFor(row.status) }));
   if (!unclear) return rows;
-  return rows.map((row) => ({ ...row, status: row.value ? "unclear" : "data_needed" }));
+  return rows.map((row) => {
+    const status = row.value ? "unclear" : "data_needed";
+    return { ...row, status, origin: originFor(status) };
+  });
+}
+
+function originFor(status: string): string {
+  if (status === "data_needed") return "missing";
+  if (status === "unclear") return "unclear";
+  if (status === "conflict") return "said";
+  return "said";
 }
 
 function ensureNote(store: Store, contactId: string, sourceId: string, body: string, createdAt: string): string {
@@ -879,7 +933,7 @@ function ensureMessage(
 
 function ensureTask(
   store: Store,
-  row: { contactId: string; sourceId: string; title: string; detail: string; dueAt: string; kind: string; createdAt: string },
+  row: { contactId: string; sourceId: string; title: string; detail: string; dueAt: string | null; kind: string; createdAt: string },
 ): string {
   const key = `task:${row.sourceId}`;
   const existing = store.taskByKey(key);
@@ -913,7 +967,7 @@ function buildWorkspace(store: Store, current: Settings, now: Date): Workspace {
 
   const overdue = store
     .openTasks()
-    .filter((task) => task.due_at && new Date(String(task.due_at)).getTime() < now.getTime() && task.kind !== "review")
+    .filter((task) => task.due_at && new Date(String(task.due_at)).getTime() < now.getTime() && task.kind !== "review" && task.kind !== "suppression")
     .map((task) => itemFromTask(task, "overdue", "This follow up is overdue."));
   const replies = store
     .openTasks()
@@ -969,7 +1023,7 @@ function buildWorkspace(store: Store, current: Settings, now: Date): Workspace {
       tone: "milestone" as const,
     }));
 
-  const sections = [
+  const sections: Workspace["sections"] = [
     { id: "failed", title: "Needs attention", empty: "No failed automations.", items: failed },
     { id: "overdue", title: "Overdue follow ups", empty: "No overdue follow ups.", items: overdue },
     { id: "leads", title: "New leads", empty: "No new leads waiting.", items: leads },
@@ -978,7 +1032,56 @@ function buildWorkspace(store: Store, current: Settings, now: Date): Workspace {
     { id: "today", title: "Today", empty: "Nothing on today's calendar.", items: today },
     { id: "milestones", title: "Upcoming milestones", empty: "No milestones in the next 14 days.", items: milestones },
   ];
-  const heroItem = [...overdue, ...leads, ...replies, ...drafts, ...today, ...milestones][0];
+  const people = store.contactsOverview();
+  const showings = store.showingFlags();
+  const openIds = new Set(store.openTaskContactIds());
+  const likely: AttentionItem[] = [];
+  for (const person of people) {
+    if (person.suppressed === 1) continue;
+    const showing = showings.find((row) => row.contact_id === person.id && row.requested_time && !row.confirmed_time);
+    const reason = movementReason(person.timeline, showing);
+    if (!reason) continue;
+    likely.push({
+      contactId: person.id,
+      title: person.display_name,
+      reason,
+      action: "Open them and send the next text yourself if it is still right.",
+      href: `#/contact/${person.id}`,
+      demo: person.is_demo === 1,
+      tone: "new",
+    });
+  }
+  const noNext = people
+    .filter((person) => person.suppressed !== 1 && !openIds.has(person.id))
+    .map((person) => ({
+      contactId: person.id,
+      title: person.display_name,
+      reason: "No open follow up is on this record.",
+      action: "Choose the next step before this person goes quiet.",
+      href: `#/contact/${person.id}`,
+      demo: person.is_demo === 1,
+      tone: "reply" as const,
+    }));
+  const gaps = people
+    .filter((person) => person.suppressed !== 1 && !person.financing_status)
+    .map((person) => ({
+      contactId: person.id,
+      title: person.display_name,
+      reason: "Financing was not stated. Prequalification is not approval, and blank is not a no.",
+      action: "Ask only when it is the useful next question. Do not treat it as approved.",
+      href: `#/contact/${person.id}`,
+      demo: person.is_demo === 1,
+      tone: "draft" as const,
+    }));
+  sections.splice(3, 0, { id: "likely", title: "Most likely to move", empty: "Nobody has a stated showing request or a near timeline.", items: likely });
+  sections.push({ id: "gaps", title: "Financing still unknown", empty: "Every live record has a stated financing status, or the desk is empty.", items: gaps });
+  sections.push({ id: "no-next", title: "No next action", empty: "Every active person has a next step.", items: noNext });
+
+  const heroItem = [...overdue, ...leads, ...replies, ...likely, ...drafts, ...today, ...milestones, ...noNext][0];
+  const live = people.filter((person) => person.is_demo !== 1);
+  const demo = people.filter((person) => person.is_demo === 1);
+  const stages = ["new", "qualifying", "consultation", "search", "showing", "offer", "under_contract", "closing", "past", "paused"];
+  const actions = [...overdue, ...leads, ...likely, ...noNext].slice(0, 3).map((item) => `${item.title}: ${item.action}`);
   return {
     generatedAt: now.toISOString(),
     outboundPaused: current.outboundPaused,
@@ -990,7 +1093,50 @@ function buildWorkspace(store: Store, current: Settings, now: Date): Workspace {
       : null,
     sections,
     alerts,
+    metrics: {
+      liveContacts: live.length,
+      demoContacts: demo.length,
+      byStage: stages
+        .map((stage) => ({
+          stage,
+          live: live.filter((person) => person.stage === stage).length,
+          demo: demo.filter((person) => person.stage === stage).length,
+        }))
+        .filter((row) => row.live + row.demo > 0),
+      requestedShowings: showings.filter((row) => row.requested_time && !row.confirmed_time).length,
+      confirmedShowings: showings.filter((row) => row.confirmed_time).length,
+      heldAppointments: null,
+      responseTime: null,
+      income: {
+        netTarget: "$250K net a year is a planning target, not a forecast.",
+        grossCommission: "Data needed.",
+        brokerageCompensation: "Data needed.",
+        expenses: "Data needed.",
+        taxes: "Data needed.",
+        netIncome: "Data needed.",
+      },
+      weekly: {
+        moved: live.length ? `${live.length} live record${live.length === 1 ? "" : "s"} on the desk. Demo records are excluded from this count.` : "No live records yet. Demo people are not counted here.",
+        stuck: gaps.filter((item) => !item.demo).length
+          ? `${gaps.filter((item) => !item.demo).length} live record${gaps.filter((item) => !item.demo).length === 1 ? "" : "s"} still missing a stated financing status.`
+          : "No live financing gap is on file.",
+        actions: actions.length ? actions : ["Paste the next real lead you are allowed to keep on this computer."],
+      },
+    },
   };
+}
+
+function movementReason(
+  timeline: string | null,
+  showing: { requested_time?: string | null; confirmed_time?: string | null } | undefined,
+): string | null {
+  if (showing?.requested_time && !showing.confirmed_time) {
+    return `They requested ${showing.requested_time}. It is not confirmed, so this is the next conversation.`;
+  }
+  if (timeline && /\b(asap|this month|30)\b/i.test(timeline)) {
+    return `They said the timeline is ${timeline}. That is why this is near the top.`;
+  }
+  return null;
 }
 
 function itemFromTask(task: Record<string, unknown>, tone: "overdue" | "reply", reason: string) {

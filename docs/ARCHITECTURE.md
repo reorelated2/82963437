@@ -25,7 +25,9 @@ One `contacts` row is the person. Linked rows:
 
 - `contact_identifiers` for phone and email. An exact phone or email matches the existing person. The same name with a different phone is a possible duplicate and is not merged.
 - `sources` keeps the pasted text or screenshot path and a content hash. The same text or image a second time does not create another contact, note, draft, or follow up.
-- `facts` stores each field as stated, data needed, unclear, or conflict.
+- `facts` stores each field as stated, data needed, unclear, or conflict. Each fact also records whether the client said it, it is missing, or the reading was unclear.
+- `households` links people who share a household. Opting out one person does not change the other person's permission to be contacted.
+- `source_attributions` keeps every lead source. The first source stays the original. A later source is added and does not replace it.
 - `properties` and `showings` keep address, MLS, requested time, available time, and confirmed time apart.
 - `messages` are drafts. `sent_at` stays empty. There is no send route.
 - `notes` are the CRM notes.

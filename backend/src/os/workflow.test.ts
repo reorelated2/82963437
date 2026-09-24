@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createHttpApp } from "./routes.js";
+import { etHour, nextMorningEt } from "./time.js";
 import { openDesk, type Desk } from "./workflow.js";
 
 const NATE = `Name: Nate Alvarez
@@ -276,8 +277,139 @@ test("demo records are marked and a failed connection stays visible", () => {
     assert.ok(workspace.alerts.some((alert) => /Redfin/i.test(`${alert.title} ${alert.detail}`)));
     assert.ok(workspace.hero);
     assert.ok(workspace.sections.some((section) => section.id === "leads" && section.items.length > 0));
+    assert.equal(workspace.metrics.liveContacts, 0);
+    assert.ok(workspace.metrics.demoContacts > 0);
+    assert.equal(workspace.metrics.heldAppointments, null);
+    assert.equal(workspace.metrics.responseTime, null);
+    assert.equal(workspace.metrics.income.grossCommission, "Data needed.");
+    assert.equal(workspace.metrics.income.brokerageCompensation, "Data needed.");
+    assert.equal(workspace.metrics.income.expenses, "Data needed.");
+    assert.equal(workspace.metrics.income.taxes, "Data needed.");
+    assert.equal(workspace.metrics.income.netIncome, "Data needed.");
+    assert.match(workspace.metrics.income.netTarget, /\$250K/);
   } finally {
     desk.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stated Spanish preference produces one Spanish question and keeps the showing unconfirmed", () => {
+  const { desk, dir } = tempDesk();
+  try {
+    const result = desk.intakeText({
+      text: `Name: Ana Ruiz
+Phone: (305) 555-0101
+Household: Ruiz
+Language: Spanish
+Area: Kendall
+Source: Redfin
+Requested showing: 5:30
+`,
+    });
+    assert.equal(
+      result.draft?.body,
+      "Hola Ana, soy Kyle Kleinman con Redfin. Vi tu solicitud para la propiedad en Kendall. ¿Te funciona 5:30 si lo puedo confirmar?",
+    );
+    assert.equal(result.showing.confirmed, null);
+    assert.match(result.note?.body ?? "", /Language: Spanish, as stated/);
+    const file = desk.contact(result.contactId);
+    assert.equal(file?.contact.language, "es");
+    assert.equal(file?.contact.suppressed, false);
+  } finally {
+    desk.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a neighborhood name does not switch the draft to Spanish", () => {
+  const { desk, dir } = tempDesk();
+  try {
+    const result = desk.intakeText({ text: "Name: Mia Costa\nPhone: (305) 555-0166\nArea: Hialeah\n" });
+    assert.equal(desk.contact(result.contactId)?.contact.language, null);
+    assert.match(result.draft?.body ?? "", /^Hey Mia, Kyle Kleinman with Redfin/);
+  } finally {
+    desk.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an opt out suppresses only that person and removes the draft", () => {
+  const { desk, dir } = tempDesk();
+  try {
+    const ana = desk.intakeText({
+      text: "Name: Ana Ruiz\nPhone: (305) 555-0101\nHousehold: Ruiz\nLanguage: Spanish\nArea: Kendall\nSource: Redfin\n",
+    });
+    const luis = desk.intakeText({
+      text: "Name: Luis Ruiz\nPhone: (305) 555-0102\nHousehold: Ruiz\nSource: Redfin\nPlease do not contact me.\n",
+    });
+    assert.equal(luis.draft, null);
+    const anaFile = desk.contact(ana.contactId);
+    const luisFile = desk.contact(luis.contactId);
+    assert.equal(anaFile?.contact.suppressed, false);
+    assert.equal(luisFile?.contact.suppressed, true);
+    assert.ok(anaFile?.contact.householdId);
+    assert.equal(anaFile?.contact.householdId, luisFile?.contact.householdId);
+    assert.ok(anaFile?.messages.some((message) => message.status === "draft"));
+    assert.equal(luisFile?.messages.length, 0);
+    assert.ok(luisFile?.tasks.some((task) => task.kind === "suppression" && task.status === "open"));
+    assert.match(luis.note?.body ?? "", /Do not send a message/);
+
+    const nate = desk.intakeText({ text: NATE });
+    const stopped = desk.intakeText({
+      text: "Name: Nate Alvarez\nPhone: (305) 555-0148\nPlease do not contact me.\n",
+    });
+    assert.equal(stopped.draft, null);
+    const nateFile = desk.contact(nate.contactId);
+    assert.equal(nateFile?.contact.suppressed, true);
+    assert.equal(nateFile?.messages.some((message) => message.status === "draft"), false);
+    assert.equal(nateFile?.tasks.filter((task) => task.status === "open").every((task) => task.kind === "suppression"), true);
+  } finally {
+    desk.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a later source does not replace the original lead source", () => {
+  const { desk, dir } = tempDesk();
+  try {
+    const first = desk.intakeText({ text: "Name: Rita Gomez\nPhone: (305) 555-0199\nSource: Redfin\n" });
+    desk.intakeText({ text: "Name: Rita Gomez\nPhone: 305-555-0199\nSource: Zillow\n" });
+    const file = desk.contact(first.contactId);
+    assert.equal(file?.contact.leadSource, "Redfin");
+    assert.equal(file?.attributions.filter((item) => item.original).map((item) => item.source).join(), "Redfin");
+    assert.ok(file?.attributions.some((item) => item.source === "Zillow" && item.original === false));
+  } finally {
+    desk.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a requested showing explains the priority, and a finished task leaves no next action", () => {
+  const { desk, dir } = tempDesk();
+  try {
+    const result = desk.intakeText({ text: NATE, now: new Date("2026-09-24T15:00:00.000Z") });
+    const workspace = desk.workspace(new Date("2026-09-24T15:00:00.000Z"));
+    const likely = workspace.sections.find((section) => section.id === "likely");
+    assert.match(likely?.items.find((item) => item.contactId === result.contactId)?.reason ?? "", /not confirmed/i);
+    const financing = desk.contact(result.contactId)?.facts.find((fact) => fact.field === "financing");
+    assert.equal(financing?.status, "data_needed");
+    assert.equal(financing?.origin, "missing");
+    assert.equal(workspace.metrics.liveContacts, 1);
+    assert.equal(workspace.metrics.demoContacts, 0);
+    desk.completeTask(result.followUp!.id);
+    const after = desk.workspace(new Date("2026-09-24T15:00:00.000Z"));
+    assert.ok(after.sections.find((section) => section.id === "no-next")?.items.some((item) => item.contactId === result.contactId));
+    desk.setStage(result.contactId, "search");
+    assert.equal(desk.contact(result.contactId)?.contact.stage, "search");
+    assert.throws(() => desk.setStage(result.contactId, "sold"));
+  } finally {
+    desk.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("follow up lands at 9 Eastern on both daylight saving change dates", () => {
+  for (const iso of ["2026-03-08T12:00:00.000Z", "2026-03-08T18:00:00.000Z", "2026-11-01T12:00:00.000Z", "2026-11-01T18:00:00.000Z"]) {
+    assert.equal(etHour(nextMorningEt(new Date(iso))), 9, iso);
   }
 });

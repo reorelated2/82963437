@@ -9,7 +9,7 @@ Grok bot: not present. See `docs/INTEGRATIONS.md`. Tasks that would have gone to
 | ID | Task | Owner | State |
 | --- | --- | --- | --- |
 | Q1 | Requirements, voice, and acceptance rules for release 1 | Grok in Cursor | Done in `docs/REQUIREMENTS.md` |
-| Q2 | Local desk: intake, review, drafts, daily screen, backup | Cursor | Done in this branch, tests passing |
+| Q2 | Local desk: intake, review, drafts, daily screen, backup, Spanish, opt-out, source history | Cursor | Done in this branch. 19 tests passing |
 | Q3 | Kyle runs setup on his computer and opens the desk | Kyle (manual) | Waiting. Steps in `docs/SETUP.md` |
 | Q4 | Decide whether any Redfin export may be copied into the desk | Kyle (manual) | Blocked. Do not import mail until he says which export is allowed |
 | Q5 | Install Tesseract if screenshot reading is wanted | Kyle (manual) | Optional. Paste still works without it |

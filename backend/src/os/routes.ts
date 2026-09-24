@@ -61,6 +61,15 @@ export function mountOs(app: Express, desk: Desk): void {
     }
   });
 
+  router.post("/contacts/:id/stage", (req, res, next) => {
+    try {
+      desk.setStage(req.params.id, String(req.body.stage ?? ""));
+      res.json({ ok: true, sent: false });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/tasks/:id/done", (req, res) => {
     desk.completeTask(req.params.id);
     res.json({ ok: true, sent: false });

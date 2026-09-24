@@ -4,7 +4,7 @@ Release 1, the new-lead desk, is in progress in this branch. The rest is not sta
 
 | Order | Module | Purpose | State |
 | --- | --- | --- | --- |
-| 0 | New lead to follow up | Summary, draft, note, reminder, daily screen | Built in this branch. Checked with synthetic records. |
+| 0 | New lead to follow up | SEND, NOTE, NEXT, match, opt-out, source history, daily screen | Built in this branch. 19 synthetic checks passed. |
 | 1 | Contacts and reactivation | Import only allowed files, preview, duplicates, consent, stop rules | Not started |
 | 2 | Buyer qualification and showings | Budget, timing, financing, next question, showing brief, feedback | Not started |
 | 3 | Property matching | Authorized MLS export or a listing Kyle supplies. No invented availability | Blocked on MLS access |

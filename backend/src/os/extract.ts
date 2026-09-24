@@ -100,6 +100,9 @@ const LABEL_MAP: Record<string, keyof ExtractedLead> = {
   previous: "previousCommunication",
   "next action": "nextAction",
   next: "nextAction",
+  language: "language",
+  idioma: "language",
+  household: "householdName",
 };
 
 const TRACKED = [
@@ -182,6 +185,9 @@ function blankLead(): ExtractedLead {
     dealBreakers: null,
     previousCommunication: null,
     nextAction: null,
+    language: null,
+    householdName: null,
+    optOut: false,
     conversation: "new",
     fieldStatus: {},
     unclearNotes: [],
@@ -218,6 +224,18 @@ function applyLabeled(lead: ExtractedLead, field: keyof ExtractedLead, value: st
   if (field === "requestedShowing" || field === "availableShowing") {
     return setString(lead, field, cleanTime(value));
   }
+  if (field === "language") {
+    const language = classifyLanguage(value);
+    if (!language) {
+      lead.fieldStatus.language = "unclear";
+      lead.unclearNotes.push("Language was present but not clear.");
+      return;
+    }
+    lead.language = language;
+    lead.fieldStatus.language = "stated";
+    return;
+  }
+  if (field === "householdName") return setString(lead, "householdName", value.replace(/\s+/g, " ").trim());
   if (field === "mls") return setString(lead, "mls", value.replace(/^#/, "").trim());
   if (typeof lead[field] === "string" || lead[field] === null) {
     setString(lead, field as "address", value);
@@ -248,6 +266,13 @@ function applyFreeform(lead: ExtractedLead, text: string): void {
   }
   if (!lead.fieldStatus.propertyUse) applyUse(lead, text);
   if (!lead.fieldStatus.financing) applyFinancing(lead, text);
+  if (!lead.language && /\b(prefiero español|hablo español|prefer spanish|in spanish)\b/i.test(text)) {
+    lead.language = "es";
+    lead.fieldStatus.language = "stated";
+  }
+  if (/\b(unsubscribe|opt out|opt-out|do not contact|don't contact|stop texting|stop emailing|remove me|no me contact\w*|no me escrib\w*|no me llam\w*)\b/i.test(text)) {
+    lead.optOut = true;
+  }
   if (!lead.timeline) {
     const timeline = text.match(/\b(ASAP|within\s+\d+\s+days|\d+\s*-\s*\d+\s+days|lease ends[^.\n]{0,40})/i);
     if (timeline) setString(lead, "timeline", timeline[0].replace(/\s+/g, " ").trim());
@@ -330,6 +355,13 @@ function applyFinancing(lead: ExtractedLead, value: string): void {
   }
 }
 
+function classifyLanguage(value: string): "en" | "es" | null {
+  const text = value.toLowerCase().trim();
+  if (/^(es|spa)$/.test(text) || /spanish|español|espanol/.test(text)) return "es";
+  if (/^(en)$/.test(text) || /english|inglés|ingles/.test(text)) return "en";
+  return null;
+}
+
 function classifyFinancing(value: string): string | null {
   const text = value.toLowerCase();
   if (/not pre-?approved|need(?:s)? (?:a )?lender|no lender/.test(text)) return "Need lender";
@@ -401,7 +433,7 @@ function statusKey(field: keyof ExtractedLead): string {
   return String(field);
 }
 
-function setString<K extends "name" | "phone" | "email" | "leadSource" | "assignedAgent" | "address" | "mls" | "requestedShowing" | "availableShowing" | "confirmedShowing" | "areas" | "timeline" | "motivation" | "mustHaves" | "dealBreakers" | "previousCommunication" | "nextAction">(
+function setString<K extends "name" | "phone" | "email" | "leadSource" | "assignedAgent" | "address" | "mls" | "requestedShowing" | "availableShowing" | "confirmedShowing" | "areas" | "timeline" | "motivation" | "mustHaves" | "dealBreakers" | "previousCommunication" | "nextAction" | "householdName">(
   lead: ExtractedLead,
   field: K,
   value: string | null,

@@ -27,6 +27,9 @@ export interface ExtractedLead {
   dealBreakers: string | null;
   previousCommunication: string | null;
   nextAction: string | null;
+  language: "en" | "es" | null;
+  householdName: string | null;
+  optOut: boolean;
   conversation: ConversationStage;
   fieldStatus: Record<string, FieldStatus>;
   unclearNotes: string[];
@@ -79,6 +82,24 @@ export interface Workspace {
   hero: { title: string; why: string; action: string; href: string } | null;
   sections: { id: string; title: string; empty: string; items: AttentionItem[] }[];
   alerts: { level: "bad" | "warn"; title: string; detail: string }[];
+  metrics: {
+    liveContacts: number;
+    demoContacts: number;
+    byStage: { stage: string; live: number; demo: number }[];
+    requestedShowings: number;
+    confirmedShowings: number;
+    heldAppointments: null;
+    responseTime: null;
+    income: {
+      netTarget: string;
+      grossCommission: string;
+      brokerageCompensation: string;
+      expenses: string;
+      taxes: string;
+      netIncome: string;
+    };
+    weekly: { moved: string; stuck: string; actions: string[] };
+  };
 }
 
 export interface Settings {

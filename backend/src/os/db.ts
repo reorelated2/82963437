@@ -23,6 +23,10 @@ export interface ContactRow {
   is_demo: number;
   suppressed: number;
   suppression_reason: string | null;
+  preferred_language: string | null;
+  relationship_type: string;
+  household_id: string | null;
+  original_lead_source: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -213,6 +217,20 @@ CREATE TABLE IF NOT EXISTS authorizations (
   stop_conditions TEXT NOT NULL,
   authorized_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS households (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_attributions (
+  id TEXT PRIMARY KEY,
+  contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  is_original INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 export class Store {
@@ -286,8 +304,9 @@ export class Store {
           id, display_name, first_name, phone, email, lead_source, assigned_agent, stage,
           property_use, financing_status, budget_cents, budget_label, timeline, motivation,
           must_haves, deal_breakers, preferred_areas, is_demo, suppressed, suppression_reason,
+          preferred_language, relationship_type, household_id, original_lead_source,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -310,6 +329,10 @@ export class Store {
         row.is_demo,
         row.suppressed,
         row.suppression_reason,
+        row.preferred_language,
+        row.relationship_type,
+        row.household_id,
+        row.original_lead_source,
         row.created_at,
         row.updated_at,
       );
@@ -359,10 +382,10 @@ export class Store {
       .run(id, contactId, kind, value);
   }
 
-  insertFact(id: string, contactId: string, field: string, value: string | null, status: string, sourceId: string, createdAt: string): void {
+  insertFact(id: string, contactId: string, field: string, value: string | null, status: string, sourceId: string, createdAt: string, origin = "said"): void {
     this.db
-      .prepare("INSERT INTO facts(id, contact_id, field, value, status, source_id, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)")
-      .run(id, contactId, field, value, status, sourceId, createdAt);
+      .prepare("INSERT INTO facts(id, contact_id, field, value, status, source_id, created_at, origin) VALUES(?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, contactId, field, value, status, sourceId, createdAt, origin);
   }
 
   insertSource(row: {
@@ -466,6 +489,16 @@ export class Store {
 
   completeTask(id: string): void {
     this.db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(id);
+  }
+
+  completeOpenFollowUps(contactId: string): void {
+    this.db
+      .prepare("UPDATE tasks SET status = 'done' WHERE contact_id = ? AND status = 'open' AND kind IN ('follow_up', 'reply')")
+      .run(contactId);
+  }
+
+  cancelOpenDrafts(contactId: string): void {
+    this.db.prepare("UPDATE messages SET status = 'cancelled', sent_at = NULL WHERE contact_id = ? AND status = 'draft'").run(contactId);
   }
 
   insertAppointment(id: string, contactId: string, title: string, startsAt: string, status: string, detail: string, createdAt: string): void {
@@ -590,6 +623,77 @@ export class Store {
       .all() as never;
   }
 
+  rememberSource(id: string, contactId: string, source: string, observedAt: string): void {
+    const current = this.contact(contactId);
+    if (!current || !source) return;
+    if (!current.original_lead_source) {
+      this.db.prepare("UPDATE contacts SET original_lead_source = ?, lead_source = COALESCE(lead_source, ?) WHERE id = ?").run(source, source, contactId);
+    }
+    const existing = this.db.prepare("SELECT id FROM source_attributions WHERE contact_id = ? AND lower(source) = lower(?)").get(contactId, source) as
+      | { id: string }
+      | undefined;
+    if (existing) return;
+    const original = !current.original_lead_source || current.original_lead_source.toLowerCase() === source.toLowerCase();
+    this.db
+      .prepare("INSERT INTO source_attributions(id, contact_id, source, observed_at, is_original) VALUES(?, ?, ?, ?, ?)")
+      .run(id, contactId, source, observedAt, original ? 1 : 0);
+  }
+
+  attributions(contactId: string): { source: string; observed_at: string; is_original: number }[] {
+    return this.db
+      .prepare("SELECT source, observed_at, is_original FROM source_attributions WHERE contact_id = ? ORDER BY observed_at ASC")
+      .all(contactId) as never;
+  }
+
+  householdByName(name: string): { id: string } | undefined {
+    return this.db.prepare("SELECT id FROM households WHERE lower(name) = lower(?)").get(name) as { id: string } | undefined;
+  }
+
+  insertHousehold(id: string, name: string, createdAt: string): void {
+    this.db.prepare("INSERT INTO households(id, name, created_at) VALUES(?, ?, ?)").run(id, name, createdAt);
+  }
+
+  linkHousehold(contactId: string, householdId: string): void {
+    this.db.prepare("UPDATE contacts SET household_id = ? WHERE id = ?").run(householdId, contactId);
+  }
+
+  setLanguageIfEmpty(contactId: string, language: string): void {
+    this.db.prepare("UPDATE contacts SET preferred_language = ? WHERE id = ? AND preferred_language IS NULL").run(language, contactId);
+  }
+
+  suppress(contactId: string, reason: string): void {
+    this.db.prepare("UPDATE contacts SET suppressed = 1, suppression_reason = ? WHERE id = ?").run(reason, contactId);
+  }
+
+  setStage(contactId: string, stage: string, updatedAt: string): void {
+    this.db.prepare("UPDATE contacts SET stage = ?, updated_at = ? WHERE id = ?").run(stage, updatedAt, contactId);
+  }
+
+  contactsOverview(): {
+    id: string;
+    display_name: string;
+    stage: string;
+    is_demo: number;
+    suppressed: number;
+    timeline: string | null;
+    financing_status: string | null;
+    phone: string | null;
+  }[] {
+    return this.db
+      .prepare("SELECT id, display_name, stage, is_demo, suppressed, timeline, financing_status, phone FROM contacts")
+      .all() as never;
+  }
+
+  showingFlags(): { contact_id: string; requested_time: string | null; confirmed_time: string | null }[] {
+    return this.db.prepare("SELECT contact_id, requested_time, confirmed_time FROM showings").all() as never;
+  }
+
+  openTaskContactIds(): string[] {
+    return (this.db.prepare("SELECT DISTINCT contact_id FROM tasks WHERE status = 'open' AND contact_id IS NOT NULL").all() as { contact_id: string }[]).map(
+      (row) => row.contact_id,
+    );
+  }
+
   demoCount(): number {
     const row = this.db.prepare("SELECT COUNT(*) AS n FROM contacts WHERE is_demo = 1").get() as { n: number };
     return Number(row.n);
@@ -673,6 +777,11 @@ export function openDatabase(file: string): DatabaseSync {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  ensureColumn(db, "contacts", "preferred_language", "preferred_language TEXT");
+  ensureColumn(db, "contacts", "relationship_type", "relationship_type TEXT NOT NULL DEFAULT 'buyer'");
+  ensureColumn(db, "contacts", "household_id", "household_id TEXT");
+  ensureColumn(db, "contacts", "original_lead_source", "original_lead_source TEXT");
+  ensureColumn(db, "facts", "origin", "origin TEXT NOT NULL DEFAULT 'said'");
   const settings = db.prepare("SELECT COUNT(*) AS n FROM settings").get() as { n: number };
   if (Number(settings.n) === 0) {
     const insert = db.prepare("INSERT INTO settings(key, value) VALUES(?, ?)");
@@ -681,6 +790,11 @@ export function openDatabase(file: string): DatabaseSync {
     insert.run("spend_month_usd", "0");
   }
   return db;
+}
+
+function ensureColumn(db: DatabaseSync, table: string, name: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((column) => column.name === name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }
 
 export function dataFile(): string {

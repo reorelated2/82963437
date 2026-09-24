@@ -98,7 +98,20 @@ async function showToday() {
       return `<section class="card"><h2>${esc(section.title)}</h2>${items}</section>`;
     })
     .join("");
-  shell("Today", `${banner(data)}${hero}${sections}`);
+  const metrics = data.metrics;
+  const numbers = metrics
+    ? `<section class="card">
+        <h2>This week</h2>
+        <p>${esc(metrics.weekly.moved)}</p>
+        <p>${esc(metrics.weekly.stuck)}</p>
+        <p class="muted">Live records: ${esc(metrics.liveContacts)}. Demo records, kept separate: ${esc(metrics.demoContacts)}. Held appointments: Data needed. Response time: Data needed.</p>
+        <p>${esc(metrics.income.netTarget)} Gross commission, brokerage pay, expenses, taxes, and net income are Data needed. No projection is shown.</p>
+        <h2>Three actions</h2>
+        <ul class="list">${metrics.weekly.actions.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
+        ${metrics.byStage.length ? `<p class="muted">${metrics.byStage.map((row) => `${esc(row.stage)}: ${row.live} live${row.demo ? `, ${row.demo} demo` : ""}`).join(" · ")}</p>` : ""}
+      </section>`
+    : "";
+  shell("Today", `${banner(data)}${hero}${numbers}${sections}`);
 }
 
 async function showIntake(message = "") {
@@ -152,7 +165,7 @@ async function showContact(id) {
   const file = await api(`/api/os/contacts/${id}`);
   const last = JSON.parse(sessionStorage.getItem("lastIntake") || "null");
   const fresh = last && last.contactId === id ? last : null;
-  const draft = file.messages[0];
+  const draft = file.contact.suppressed ? null : file.messages.find((message) => message.status === "draft" || message.status === "approved");
   const note = file.notes[0];
   const state = fresh?.duplicateEvent
     ? `<div class="alert warn">This exact lead was already here. No second contact, note, or follow up was created.</div>`
@@ -179,13 +192,19 @@ async function showContact(id) {
     `${state}
     <section class="card">
       <div class="row"><h1>${esc(file.contact.name)}</h1>${file.contact.demo ? '<span class="badge">DEMO</span>' : ""}</div>
-      <p class="muted">${esc(file.contact.phone || "Phone: Data needed.")} · ${esc(file.contact.stage)}</p>
+      <p class="muted">${esc(file.contact.phone || "Phone: Data needed.")} · ${esc(file.contact.stage)}${file.contact.language === "es" ? " · Spanish" : ""}${file.contact.suppressed ? " · Do not contact" : ""}</p>
+      <p class="muted">Original source: ${esc(file.contact.leadSource || "Data needed.")}</p>
+      ${file.contact.priorityReason ? `<p>${esc(file.contact.priorityReason)}</p>` : ""}
+      ${file.attributions?.length ? `<p class="muted">Source history: ${file.attributions.map((item) => `${esc(item.source)}${item.original ? " (original)" : ""}`).join(", ")}</p>` : ""}
+      <div class="actions" id="stages">
+        ${["new", "qualifying", "consultation", "search", "showing", "offer", "under_contract", "closing", "past", "paused"].map((stage) => `<button class="btn-quiet" data-stage="${stage}" type="button">${stage === file.contact.stage ? "● " : ""}${stage.replaceAll("_", " ")}</button>`).join("")}
+      </div>
       ${showing ? `<p>Requested: ${esc(showing.requestedTime || "Data needed.")}<br>Available: ${esc(showing.availableTime || "Data needed.")}<br>Confirmed: ${esc(showing.confirmedTime || "no")}</p>` : "<p>No showing time is on file.</p>"}
       <p><strong>Next:</strong> ${esc(nextTask ? `${nextTask.title}. ${nextTask.detail || ""}` : "Nothing is scheduled.")}</p>
       ${shortNote ? `<p>${esc(shortNote)}</p>` : ""}
     </section>
     <section class="card">
-      <h2>Next text</h2>
+      <h2>SEND</h2>
       ${
         draft
           ? `<div class="message">${esc(draft.body)}</div>
@@ -201,11 +220,13 @@ async function showContact(id) {
                <button class="btn" id="approve" type="button">I will send this myself</button>
                <button class="btn-quiet" id="copy-text" type="button">Copy text</button>
              </div>`
-          : `<div class="alert bad">No client text is ready. The source was unclear or incomplete.</div>`
+          : file.contact.suppressed
+            ? `<div class="alert bad">Do not send a message. They asked not to be contacted.</div>`
+            : `<div class="alert bad">No client text is ready. The source was unclear or incomplete.</div>`
       }
     </section>
     <section class="card">
-      <h2>CRM note</h2>
+      <h2>NOTE</h2>
       <p class="muted">Copy this into Redfin. This desk does not write to Redfin.</p>
       <div class="message" id="note">${esc(note?.body || "No note yet.")}</div>
       <div class="actions"><button class="btn-quiet" id="copy-note" type="button">Copy note</button></div>
@@ -225,7 +246,7 @@ async function showContact(id) {
         : ""
     }
     <section class="card">
-      <h2>Follow ups</h2>
+      <h2>NEXT</h2>
       ${file.tasks.map((task) => `<div class="item"><strong>${esc(task.title)}</strong><div>${esc(task.detail || "")}</div><div class="muted">${when(task.dueAt)} · ${esc(task.status)}</div>${task.status === "open" ? `<button class="btn-quiet" data-task="${esc(task.id)}" type="button">Mark done</button>` : ""}</div>`).join("") || "<div class='empty'>No follow ups.</div>"}
     </section>`,
   );
@@ -236,6 +257,12 @@ async function showContact(id) {
   });
   document.querySelector("#copy-text")?.addEventListener("click", () => copyText(draft.body));
   document.querySelector("#copy-note")?.addEventListener("click", () => copyText(note?.body || ""));
+  document.querySelectorAll("[data-stage]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/os/contacts/${id}/stage`, { method: "POST", body: JSON.stringify({ stage: button.dataset.stage }) });
+      showContact(id);
+    });
+  });
   document.querySelectorAll("[data-task]").forEach((button) => {
     button.addEventListener("click", async () => {
       await api(`/api/os/tasks/${button.dataset.task}/done`, { method: "POST", body: "{}" });

@@ -14,7 +14,7 @@ Outbound automations start paused. Approving a draft does not send it.
 2. Paste the lead or the text thread into the box.
 3. If you have a screenshot, choose the image. If the image might be blurry, paste the text as well.
 4. Tap **Prepare follow up**.
-5. Expected result: the client page opens with a short note, the exact text to send, the Redfin note, what is known, and what is still "Data needed."
+5. Expected result: the client page opens with three blocks. **SEND** is the text to copy. **NOTE** is the note to paste into Redfin. **NEXT** is the one follow up. Known facts and "Data needed" are listed under those.
 
 If the screenshot cannot be read, you get a warning and no client text. Paste the words and try again.
 
@@ -34,7 +34,13 @@ If the screenshot cannot be read, you get a warning and no client text. Paste th
 
 ## Follow up
 
-The reminder time is for you. It is not an automatic text. When you have done it, tap **Mark done** on that follow up.
+The reminder time is for you. It is not an automatic text. When you have done it, tap **Mark done** on that follow up. If that was the only open step, Today lists the person under **No next action**.
+
+The stage buttons on the client page (new, qualifying, consultation, search, showing, offer, under contract, closing, past, paused) only change the working record on this desk.
+
+If the paste says not to contact them, **SEND** tells you not to text. That applies to that person only. Someone else in the same household can still have a draft.
+
+A Spanish preference has to be stated (Language: Spanish, or they ask for Spanish). A neighborhood name does not switch the language.
 
 ## Search
 

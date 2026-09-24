@@ -8,17 +8,22 @@ const USE_LABEL: Record<PropertyUse, string> = {
 };
 
 export function draftClientMessage(lead: ExtractedLead): { body: string; purpose: string } | null {
-  if (lead.lowConfidence) return null;
+  if (lead.lowConfidence || lead.optOut) return null;
   const first = lead.name?.split(" ")[0] ?? null;
   const place = placePhrase(lead);
   const time = lead.requestedShowing ?? lead.availableShowing;
   const continuing = lead.conversation === "continuing";
+  const spanish = lead.language === "es";
   const clientAlreadyOffered = Boolean(lead.availableShowing) && !lead.confirmedShowing;
 
   if (clientAlreadyOffered && time) {
-    const body = continuing || !first
-      ? `I'll request ${time} and text you once it is confirmed.`
-      : `Hey ${first}, Kyle Kleinman with Redfin. I'll request ${time}${place ? ` for the ${place}` : ""} and text you once it is confirmed.`;
+    const body = spanish
+      ? continuing || !first
+        ? `Voy a pedir ${time} y te escribo cuando esté confirmado.`
+        : `Hola ${first}, soy Kyle Kleinman con Redfin. Voy a pedir ${time}${place ? ` para la propiedad en ${place.replace(/ property$/, "")}` : ""} y te escribo cuando esté confirmado.`
+      : continuing || !first
+        ? `I'll request ${time} and text you once it is confirmed.`
+        : `Hey ${first}, Kyle Kleinman with Redfin. I'll request ${time}${place ? ` for the ${place}` : ""} and text you once it is confirmed.`;
     return { body: clientCopy(body), purpose: "Request the time the client offered. It is not confirmed yet." };
   }
 
@@ -47,6 +52,27 @@ export function draftClientMessage(lead: ExtractedLead): { body: string; purpose
     question = "Want me to send a few that fit what you described?";
   }
 
+  if (spanish) {
+    const area = place ? place.replace(/ property$/, "") : null;
+    const spanishQuestion = lead.requestedShowing && !lead.confirmedShowing
+      ? `¿Te funciona ${lead.requestedShowing} si lo puedo confirmar?`
+      : !place
+        ? "¿En qué zonas estás buscando?"
+        : !lead.budgetLabel
+          ? "¿En qué rango de precio debo quedarme?"
+          : !lead.timeline
+            ? "¿Para cuándo quieres estar en la propiedad?"
+            : "¿Quieres que te envíe algunas que encajen con lo que describiste?";
+    const body = continuing
+      ? spanishQuestion
+      : first && area
+        ? `Hola ${first}, soy Kyle Kleinman con Redfin. Vi tu solicitud para la propiedad en ${area}. ${spanishQuestion}`
+        : first
+          ? `Hola ${first}, soy Kyle Kleinman con Redfin. Vi tu solicitud. ${spanishQuestion}`
+          : `Hola, soy Kyle Kleinman con Redfin. Vi tu solicitud. ${spanishQuestion}`;
+    return { body: clientCopy(body), purpose };
+  }
+
   const body = continuing
     ? question
     : first && place
@@ -67,6 +93,7 @@ export function placePhrase(lead: ExtractedLead): string | null {
 }
 
 export function internalNote(lead: ExtractedLead, followUpLabel: string): string {
+  if (lead.optOut) return "Do not text. They asked not to be contacted.";
   if (lead.lowConfidence) {
     return "The screenshot could not be read clearly. Paste the text or upload a sharper image before you text anyone.";
   }
@@ -89,6 +116,8 @@ export function crmNote(lead: ExtractedLead, followUpLabel: string, demo: boolea
     : `Showing requested: ${lead.requestedShowing ?? "Data needed."} Available: ${lead.availableShowing ?? "Data needed."} Confirmed: no.`;
   return [
     demo ? "DEMO record. Not a real client." : "Working note for Redfin. This desk does not write to Redfin.",
+    lead.optOut ? "They asked not to be contacted. Do not send a message." : null,
+    lead.language === "es" ? "Language: Spanish, as stated." : null,
     line("Name", lead.name),
     line("Phone", lead.phone),
     line("Email", lead.email),
