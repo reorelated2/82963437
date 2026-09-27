@@ -49,6 +49,7 @@ export interface Inbound {
     recipientKey?: string;
     listingUnavailable?: boolean;
     listingLastVerifiedAt?: string | null;
+    alternateKeys?: string[];
   };
 }
 
@@ -106,4 +107,5 @@ export interface WakeResult {
   blocker: string | null;
   questionId: string | null;
   steps: string[];
+  handoff: string;
 }

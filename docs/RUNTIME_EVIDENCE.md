@@ -8,7 +8,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test` reported 50 passed, 0 failed. Twenty of those are the buyer-conversion acceptance cases in `ops/test/acceptance.test.ts`. The supplied core prompt is stored at `policy/KYLEOS_CORE_PROMPT.md`.
+Typecheck passed. `npm test` reported 52 passed, 0 failed. Twenty-two of those are the buyer-conversion acceptance cases in `ops/test/acceptance.test.ts`. The supplied core prompt is stored at `policy/KYLEOS_CORE_PROMPT.md`.
 
 ## What the acceptance run actually did
 
@@ -22,7 +22,9 @@ Passed on the synthetic ledger:
 - A second worker does not send the same action.
 - A reply supersedes the queued follow up. The original due time does not replay that first question.
 - Closing the database and reopening it, then calling `reconcileDue` at the stored due time, sends the nudge with no new prompt. The routine row stays `platform_routine_id` null, schedule `*/15 * * * *`, timezone America/New_York.
-- An ownership change does not send another message to the old number.
+- An ownership change pauses the record without overwriting the owner. A later reply stays blocked.
+- An unavailable listing source is written as a freshness gap with its last verified timestamp.
+- A completed field inspection is not collected revenue, and no invoice is called overdue without terms.
 - Listing access without buyer acknowledgment stays not fully confirmed.
 - A coordinator event writes a note that Kyle did not call or speak with the buyer, and sends nothing.
 - Opt out and human takeover still block contact after the file is reopened.

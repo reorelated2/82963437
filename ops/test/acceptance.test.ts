@@ -199,6 +199,68 @@ test('an unavailable listing source is reported as a freshness gap', () => {
   db.close();
 });
 
+test('a conflicting identity is held and not merged', () => {
+  const db = tempDb();
+  const channel = createSyntheticAdapter();
+  const shared = ctx(channel);
+  wake(db, inbound({
+    eventKey: 'id-1',
+    kind: 'inquiry',
+    personKey: 'phone:3055550101',
+    displayName: 'Riley Chen',
+    text: 'I want to see the North Miami house.',
+    signals: { alternateKeys: ['email:riley@example.com'] },
+  }), shared);
+  const other = wake(db, inbound({
+    eventKey: 'id-2',
+    kind: 'inquiry',
+    personKey: 'phone:3055550177',
+    displayName: 'R. Chen',
+    text: 'I want to see the Hollywood house.',
+    signals: { alternateKeys: ['email:riley@example.com'] },
+  }), shared);
+  assert.equal(other.status, 'held');
+  assert.match(other.blocker ?? '', /Identity conflict/);
+  assert.equal(channel.sends.length, 1);
+  assert.match(other.handoff, /Exact message: none/);
+  db.close();
+});
+
+test('a changed appointment time clears access and acknowledgment', () => {
+  const db = tempDb();
+  const channel = createSyntheticAdapter();
+  const shared = ctx(channel);
+  wake(db, inbound({ eventKey: 'chg-1', kind: 'inquiry', text: 'I want to see the North Miami house Saturday at 5:30.' }), shared);
+  wake(db, inbound({
+    eventKey: 'chg-2',
+    kind: 'access_update',
+    sourceVersion: 'v2',
+    actor: 'listing',
+    text: 'Access approved for Saturday at 5:30.',
+    signals: { accessApproved: true, agentAssigned: 'Kyle Kleinman', paperworkDone: true },
+  }), shared);
+  const acknowledged = wake(db, inbound({
+    eventKey: 'chg-3',
+    kind: 'reply',
+    sourceVersion: 'v3',
+    text: 'Yes, Saturday at 5:30 works.',
+    signals: { buyerAcknowledgedTime: true },
+  }), shared);
+  assert.equal(acknowledged.missingCheckpoints.includes('access_approved'), false);
+  const changed = wake(db, inbound({
+    eventKey: 'chg-4',
+    kind: 'reply',
+    sourceVersion: 'v4',
+    text: 'Can we do Sunday at 2:00 pm instead?',
+  }), shared);
+  assert.equal(changed.showingFullyConfirmed, false);
+  assert.ok(changed.missingCheckpoints.includes('access_approved'));
+  assert.ok(changed.missingCheckpoints.includes('buyer_acknowledged'));
+  assert.doesNotMatch(channel.sends.at(-1)?.body ?? '', /approved the requested time/i);
+  assert.match(changed.handoff, /Showing not fully confirmed/);
+  db.close();
+});
+
 test('a completed inspection is not collected revenue', () => {
   const done = fieldOrderStatus({
     inspectionComplete: true,

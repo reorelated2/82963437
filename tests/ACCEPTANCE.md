@@ -8,7 +8,9 @@ Command on 2026-09-27:
 cd ops && npx tsc --noEmit && npm test
 ```
 
-Result: 50 passed, 0 failed. The 20 acceptance cases passed against the synthetic ledger. They do not prove a live connector.
+Result: 52 passed, 0 failed. The 22 acceptance cases passed against the synthetic ledger. They do not prove a live connector.
+
+Section 15 of the core prompt names nine release tests. Each has an executed case: duplicate events, conflicting identity, opt-out, reassignment, changed appointment, missing buyer acknowledgment, unavailable data, send timeout, human takeover.
 
 | Scenario | Result |
 | --- | --- |
@@ -19,7 +21,10 @@ Result: 50 passed, 0 failed. The 20 acceptance cases passed against the syntheti
 | Buyer replies while follow-up is queued | Passed. Original question was not replayed at the old due time. |
 | Follow-up due with app closed | Passed as a reopened ledger plus `reconcileDue`. Not a registered cloud routine. Periodic schedule only. |
 | Source changes after plan is made | Passed. Ownership change sent nothing further to the old number. |
-| Access approved, buyer acknowledgment absent | Passed. Missing checkpoint kept. Not fully confirmed. |
+| Lead reassigned before execution | Passed. Record owner stays Kyle Kleinman, stage `ownership_paused`, later reply still blocked. Ownership is not overwritten. |
+| Access approved, buyer acknowledgment absent | Passed. Missing checkpoint kept with owner `buyer`. Not fully confirmed. |
+| Listing source unavailable or stale | Passed. Note names the last verified timestamp. Status not invented. No send. |
+| Inspection complete, payment absent | Passed. `fieldOrderStatus` keeps completion, invoicing, and payment separate. No overdue claim without terms. |
 | Coordinator contact only | Passed. Note says Kyle did not call or speak with the buyer. |
 | Opt-out or human takeover | Passed across a database reopen. |
 | Send times out after possible acceptance | Passed. No second send. |

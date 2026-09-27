@@ -71,6 +71,11 @@ CREATE TABLE IF NOT EXISTS action_claims (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS opportunity_identifiers (
+  identifier TEXT PRIMARY KEY,
+  opportunity_id TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS routine_state (
   id TEXT PRIMARY KEY,
   schedule TEXT NOT NULL,
@@ -154,7 +159,23 @@ export function ensureOpportunity(db: SqlDb, input: {
       );
     }
   }
-  return loadOpportunity(db, input.personKey)!;
+  const loaded = loadOpportunity(db, input.personKey)!;
+  db.run(`INSERT OR IGNORE INTO opportunity_identifiers (identifier, opportunity_id) VALUES (?, ?)`, input.personKey, loaded.id);
+  return loaded;
+}
+
+export function identityConflict(db: SqlDb, opportunityId: string, keys: string[]): string | null {
+  for (const key of keys) {
+    const row = db.get(`SELECT opportunity_id FROM opportunity_identifiers WHERE identifier = ?`, key);
+    if (row && text(row, 'opportunity_id') !== opportunityId) return key;
+  }
+  return null;
+}
+
+export function rememberIdentifiers(db: SqlDb, opportunityId: string, keys: string[]): void {
+  for (const key of keys) {
+    db.run(`INSERT OR IGNORE INTO opportunity_identifiers (identifier, opportunity_id) VALUES (?, ?)`, key, opportunityId);
+  }
 }
 
 export function loadOpportunity(db: SqlDb, personKey: string): OpportunityRow | null {
@@ -262,7 +283,8 @@ export function insertEvent(db: SqlDb, eventKey: string, opportunityId: string |
   }
 }
 
-export function saveEventResult(db: SqlDb, eventKey: string, result: unknown): void {
+export function saveEventResult(db: SqlDb, eventKey: string, result: unknown, finalize?: (value: unknown) => void): void {
+  if (finalize) finalize(result);
   db.run(`UPDATE runtime_events SET result_json = ? WHERE event_key = ?`, JSON.stringify(result), eventKey);
 }
 

@@ -105,6 +105,12 @@ export function decide(opp: OpportunityRow, inbound: Inbound): Decision {
   const absorbed = absorbFacts(text);
   facts.push(...absorbed.facts);
   if (absorbed.showingTime) {
+    const previous = opp.facts.showing_requested?.value;
+    if (previous && previous.toLowerCase() !== absorbed.showingTime.toLowerCase()) {
+      for (const key of ['access_approved', 'buyer_notified', 'buyer_acknowledged'] as const) {
+        checkpoints.push({ key, status: 'missing', evidence: `Time changed from ${previous} to ${absorbed.showingTime}. Needs a fresh check.` });
+      }
+    }
     checkpoints.push({ key: 'requested', status: 'satisfied', evidence: absorbed.showingTime });
     facts.push({ key: 'showing_requested', value: absorbed.showingTime, basis: 'said' });
   }

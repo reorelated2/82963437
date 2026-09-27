@@ -5,6 +5,8 @@ import { decide, missingCheckpoints, showingFullyConfirmed, type Decision } from
 import {
   ambiguousClaim,
   countSendReceipts,
+  identityConflict,
+  rememberIdentifiers,
   dueOpportunities,
   ensureOpportunity,
   finishClaim,
@@ -42,7 +44,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
 
   if (!inbound.personKey || inbound.personKey.endsWith(':')) {
     const held = baseResult(null, 'held', 'No phone or email. No contact was created.');
-    saveEventResult(db, inbound.eventKey, held);
+    saveEventResult(db, inbound.eventKey, held, attachHandoff);
     return held;
   }
 
@@ -56,6 +58,19 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
     synthetic,
     now: inbound.now,
   });
+
+  const alternates = inbound.signals?.alternateKeys ?? [];
+  const conflictKey = identityConflict(db, opp.id, alternates);
+  if (conflictKey) {
+    const blocker = `Identity conflict. ${conflictKey} belongs to a different record. Nothing was merged and no message was sent.`;
+    updateOpportunity(db, opp.id, { blocker, stage: 'identity_conflict', follow_up_due_at: null }, inbound.now);
+    supersedeQueued(db, opp.id, inbound.now);
+    const held = baseResult(opp.id, 'held', 'Conflicting identity. Held for Kyle.');
+    held.blocker = blocker;
+    saveEventResult(db, inbound.eventKey, held, attachHandoff);
+    return held;
+  }
+  rememberIdentifiers(db, opp.id, alternates);
 
   if (inbound.kind === 'source_change') {
     const patch: Record<string, string | number | null> = { source_version: inbound.sourceVersion };
@@ -71,7 +86,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
     updateOpportunity(db, opp.id, { follow_up_due_at: null }, inbound.now);
     const stopped = baseResult(opp.id, 'suppressed', opp.takeover === 'human' ? 'Human takeover is on. Automatic outreach stays off.' : 'Opt out is still in effect.');
     stopped.missingCheckpoints = missingCheckpoints(loadOpportunityById(db, opp.id)!);
-    saveEventResult(db, inbound.eventKey, stopped);
+    saveEventResult(db, inbound.eventKey, stopped, attachHandoff);
     return stopped;
   }
 
@@ -81,13 +96,13 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
     supersedeQueued(db, opp.id, inbound.now);
     const escalated = baseResult(opp.id, 'escalated', 'Ownership conflict. No message was sent.');
     escalated.blocker = blocker;
-    saveEventResult(db, inbound.eventKey, escalated);
+    saveEventResult(db, inbound.eventKey, escalated, attachHandoff);
     return escalated;
   }
   if (opp.stage === 'ownership_paused') {
     const held = baseResult(opp.id, 'escalated', 'Ownership is still unresolved. Automatic outreach stays paused.');
     held.blocker = opp.blocker;
-    saveEventResult(db, inbound.eventKey, held);
+    saveEventResult(db, inbound.eventKey, held, attachHandoff);
     return held;
   }
 
@@ -100,7 +115,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
     const held = baseResult(opp.id, 'ambiguous', 'An earlier send result is unknown. It was not repeated.');
     held.blocker = 'Reconcile the original send before any new contact.';
     updateOpportunity(db, opp.id, { blocker: held.blocker, stage: 'ambiguous' }, inbound.now);
-    saveEventResult(db, inbound.eventKey, held);
+    saveEventResult(db, inbound.eventKey, held, attachHandoff);
     return held;
   }
 
@@ -137,7 +152,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
   if (current.stage === 'ownership_paused' || current.takeover === 'human' || current.suppression !== 'none') {
     const revised = baseResult(opp.id, 'escalated', 'The record changed before send. The stale plan was not used.');
     supersedeQueued(db, opp.id, inbound.now);
-    saveEventResult(db, inbound.eventKey, revised);
+    saveEventResult(db, inbound.eventKey, revised, attachHandoff);
     return revised;
   }
 
@@ -148,7 +163,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
     const held = finish(db, inbound, opp.id, 'held', null, { ...decision, note: `Quiet hours. Next permitted check ${quiet}.` }, 'none', [...steps, 'quiet_hours']);
     held.blocker = 'Outside quiet hours. Nothing was sent.';
     held.nextDueAt = quiet;
-    saveEventResult(db, inbound.eventKey, held);
+    saveEventResult(db, inbound.eventKey, held, attachHandoff);
     return held;
   }
 
@@ -165,7 +180,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
   if (claim === 'not_owner') {
     const skipped = baseResult(opp.id, 'not_owner', 'Another worker owns this outbound action.');
     skipped.actionKey = actionKey;
-    saveEventResult(db, inbound.eventKey, skipped);
+    saveEventResult(db, inbound.eventKey, skipped, attachHandoff);
     return skipped;
   }
   steps.push('claim');
@@ -236,7 +251,7 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
   result.live = receipt.mode === 'live' && receipt.live === true;
   result.nextDueAt = due;
   result.blocker = pendingWrite ? 'Message accepted. Record write is still pending.' : null;
-  saveEventResult(db, inbound.eventKey, result);
+  saveEventResult(db, inbound.eventKey, result, attachHandoff);
   return result;
 }
 
@@ -294,7 +309,7 @@ function resumeWrite(db: SqlDb, inbound: Inbound, ctx: RuntimeContext, opp: Oppo
   result.blocker = write.outcome === 'written' ? null : write.reason;
   const sends = countSendReceipts(db, opp.id);
   result.questionId = `writes_kept:${sends}`;
-  saveEventResult(db, inbound.eventKey, result);
+  saveEventResult(db, inbound.eventKey, result, attachHandoff);
   return result;
 }
 
@@ -331,7 +346,7 @@ function budgetStop(db: SqlDb, inbound: Inbound, opp: OpportunityRow, steps: str
   result.steps = steps;
   result.blocker = result.message;
   updateOpportunity(db, opp.id, { blocker: result.message, stage: 'paused_budget' }, inbound.now);
-  saveEventResult(db, inbound.eventKey, result);
+  saveEventResult(db, inbound.eventKey, result, attachHandoff);
   return result;
 }
 
@@ -358,7 +373,7 @@ function finish(
   result.checkpointOwners = result.missingCheckpoints.map((checkpoint) => ({ checkpoint, owner: CHECKPOINT_OWNERS[checkpoint] }));
   result.showingFullyConfirmed = showingFullyConfirmed(fresh);
   result.nextDueAt = fresh.followUpDueAt;
-  saveEventResult(db, inbound.eventKey, result);
+  saveEventResult(db, inbound.eventKey, result, attachHandoff);
   return result;
 }
 
@@ -378,5 +393,25 @@ function baseResult(opportunityId: string | null, status: WakeResult['status'], 
     blocker: null,
     questionId: null,
     steps: [],
+    handoff: '',
   };
+}
+
+function attachHandoff(value: unknown): void {
+  const result = value as WakeResult;
+  result.handoff = handoffReport(result);
+}
+
+export function handoffReport(result: WakeResult): string {
+  const move = result.status === 'acted'
+    ? `Next move: ${result.questionId ?? 'follow up'}. Sent through ${result.mode} channel. Live: ${result.live}.`
+    : `Next move: none sent. Status ${result.status}.`;
+  const message = result.status === 'acted' && result.message ? `Exact message: ${result.message}` : 'Exact message: none.';
+  const note = `Agent Tools note (drafted, not saved to Agent Tools): ${result.note ?? 'none'}`;
+  const followUp = result.nextDueAt ? `Follow up: Grok Bot at ${result.nextDueAt}.` : 'Follow up: none scheduled.';
+  const status = result.blocker ? `Execution status: ${result.status}. Blocker: ${result.blocker}` : `Execution status: ${result.status}.`;
+  const showing = result.missingCheckpoints.length
+    ? `Showing not fully confirmed. Missing: ${result.checkpointOwners.map((item) => `${item.checkpoint} (${item.owner})`).join(', ')}.`
+    : 'Showing fully confirmed.';
+  return [move, message, note, followUp, status, showing].join('\n');
 }
