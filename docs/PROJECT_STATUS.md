@@ -22,7 +22,7 @@ Stage 1 of KyleOS Command, package name `kleinman-lead-desk`, at `ops/`.
 - Draft only. Opt-out blocks the draft. `sent_messages` stays empty. Matches and drafts are written to `audit_log`.
 - SQLite file, export, and a tested backup/restore.
 - DEMO seed is labeled. It is not a live CRM.
-- 30 automated tests passing, plus a Chrome walkthrough. Board picture: `docs/screenshots/command-board.png`.
+- 48 automated tests passing. The buyer workflow resume is covered by reopening the ledger and running the due reconcile. Board picture: `docs/screenshots/command-board.png`.
 
 ## Verified
 
@@ -32,7 +32,9 @@ npx tsc --noEmit
 node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts
 ```
 
-Typecheck passed. Tests: 30 passed, 0 failed. Five of those run the inquiry agent.
+Typecheck passed. Tests: 48 passed, 0 failed on 2026-09-27. Eighteen are the buyer-conversion acceptance cases. Those sends are synthetic, `live: false`. Evidence: `docs/RUNTIME_EVIDENCE.md`.
+
+The tick command is `cd ops && npm run tick`. It is not a registered Grok Bot routine. Live send is off under policy `2026-09-27.unreleased`. Quo, Gmail send, and Agent Tools write are unverified.
 
 Chrome walkthrough passed for sign-in, the synthetic board, SEND / NOTE / NEXT, blocked send, saved note, no-next-action, search, a new paste, and a 390px layout. Details are in `docs/TEST_RESULTS.md`.
 

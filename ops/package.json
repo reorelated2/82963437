@@ -8,6 +8,8 @@
     "start": "node --experimental-strip-types --experimental-sqlite src/server.ts",
     "test": "node --experimental-strip-types --experimental-sqlite --test test/*.ts",
     "typecheck": "tsc --noEmit",
+    "tick": "node --experimental-strip-types --experimental-sqlite src/runtime-cli.ts tick",
+    "runtime-status": "node --experimental-strip-types --experimental-sqlite src/runtime-cli.ts status",
     "backup": "node --experimental-strip-types --experimental-sqlite src/backup-cli.ts backup",
     "restore": "node --experimental-strip-types --experimental-sqlite src/backup-cli.ts restore"
   },

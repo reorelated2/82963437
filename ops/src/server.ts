@@ -82,7 +82,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
   const path = url.pathname;
   const method = req.method ?? 'GET';
   if (method === 'GET' && path === '/api/health') {
-    sendJson(res, 200, { ok: true, service: 'kleinman-lead-desk', product: 'KyleOS Command', outbound: 'draft' });
+    sendJson(res, 200, {
+      ok: true,
+      service: 'kleinman-lead-desk',
+      product: 'KyleOS Command',
+      outbound: 'draft',
+      runtime: {
+        live: false,
+        routineId: null,
+        schedule: '*/15 * * * *',
+        timezone: 'America/New_York',
+        connectors: { quo: 'unverified', gmailSend: 'unverified', agentToolsWrite: 'unverified' },
+      },
+    });
     return;
   }
   if (method === 'GET' && path === '/api/session') {
