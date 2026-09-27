@@ -1,5 +1,19 @@
 # Test results
 
+## Agents, 2026-09-27
+
+From `backend`, after `npm install`: `./node_modules/.bin/tsc --noEmit && npm test`. Typecheck passed. 28 passed, 0 failed.
+
+Local process `http://127.0.0.1:8080` (not a deployment):
+
+- `GET /agents` listed consult, market, and mls, and said they do not send texts or emails.
+- `POST /agents/consult` with Lease Expiring and Need Lender returned readiness 26, financing stated as Need Lender, and next step "That is not an approval."
+- `POST /agents/desk` with "send the follow up text" returned HTTP 400.
+- `POST /agents/mls` with `demoSeed: true` returned `demo: true`.
+- `GET /api/os/workspace` returned HTTP 404.
+
+## Earlier checks
+
 ## This lane, 2026-09-24 (Buyer Command Center)
 
 Command, from `backend`:

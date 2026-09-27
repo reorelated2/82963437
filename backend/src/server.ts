@@ -9,6 +9,7 @@ import { generateStrategy } from './lib/aiEngine.js';
 import { collectRedfinMarkets } from './lib/redfinCollector.js';
 import { startCollectorSchedule } from './collector/scheduler.js';
 import { analyzeMlsFeeds, getHiramSeedAnalysis, type MlsListing } from './lib/mlsAnalyzer.js';
+import { listAgents, runAgent } from './agents/router.js';
 import { mountOs } from './os/routes.js';
 import { openDesk } from './os/workflow.js';
 
@@ -33,12 +34,26 @@ export function createApp(): express.Express {
         lane: 'Consult intake, cached market metrics, and MLS analyze helpers.',
         leadDesk: 'Not mounted. Inquiry SEND/NOTE/NEXT belongs to the other agent. See docs/HANDOFF_BOUNDARY.md.',
         messaging: 'No client messaging on this server.',
-        routes: ['/health', '/markets/:city', '/strategy', '/mls/hiram-zone', '/mls/analyze', '/clients'],
+        routes: ['/health', '/agents', '/agents/:name', '/markets/:city', '/strategy', '/mls/hiram-zone', '/mls/analyze', '/clients'],
       });
     });
   }
 
   app.get('/health', (_req, res) => res.json({ ok: true, product: 'buyer-command-center', leadDeskMounted: leadDeskEnabled() }));
+
+  app.get('/agents', (_req, res) => {
+    res.json({
+      product: 'South Florida Buyer Command Center',
+      messaging: 'No client messaging. These agents do not send texts or emails.',
+      agents: listAgents(),
+    });
+  });
+
+  app.post('/agents/:name', async (req, res) => {
+    const result = await runAgent(req.params.name, req.body ?? {});
+    const status = result.status === 'refused' ? 400 : 200;
+    res.status(status).json(result);
+  });
 
 app.get('/markets/:city', async (req, res) => {
   const city = req.params.city;

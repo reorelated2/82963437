@@ -8,7 +8,8 @@ Product: **South Florida Buyer Command Center**.
 
 Owns:
 
-- Consult intake in `mobile/` (readiness, financing prompt, strategy screen).
+- Three local agents on this server: `consult`, `market`, and `mls`. Open `GET /agents`. They do not draft or send client messages. An inquiry request is refused and left to the other agent.
+- Consult intake in `mobile/` (readiness, financing prompt, strategy screen). The consult agent uses the same answer weights and does not emit the unverified lender script.
 - Cached market metrics: `GET /markets/:city`. Needs Supabase. Not connected in this environment.
 - Strategy draft: `POST /strategy`. Needs `OPENAI_API_KEY`. Not connected. It does not text a client.
 - Client save: `POST /clients`. Needs Supabase. Not connected.
