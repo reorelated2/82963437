@@ -32,7 +32,7 @@ npx tsc --noEmit
 node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts
 ```
 
-Typecheck passed. Tests: 48 passed, 0 failed on 2026-09-27. Eighteen are the buyer-conversion acceptance cases. Those sends are synthetic, `live: false`. Evidence: `docs/RUNTIME_EVIDENCE.md`.
+Typecheck passed. Tests: 50 passed, 0 failed on 2026-09-27. Twenty are the buyer-conversion acceptance cases. Those sends are synthetic, `live: false`. Evidence: `docs/RUNTIME_EVIDENCE.md`.
 
 The tick command is `cd ops && npm run tick`. It is not a registered Grok Bot routine. Live send is off under policy `2026-09-27.unreleased`. Quo, Gmail send, and Agent Tools write are unverified.
 

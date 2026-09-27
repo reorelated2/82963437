@@ -59,6 +59,15 @@ export function decide(opp: OpportunityRow, inbound: Inbound): Decision {
     };
   }
 
+  if (inbound.signals?.listingUnavailable) {
+    const verified = inbound.signals.listingLastVerifiedAt ?? 'never';
+    return noteDecision(
+      'listing_stale',
+      `Listing source for ${property} is unavailable. Last verified ${verified}. Current listing status is unknown and was not invented.`,
+      'A stale or missing source is reported as a freshness gap, not as current status.',
+    );
+  }
+
   if (isUntrustedExport(text)) {
     return noteDecision(
       'refuse_export',

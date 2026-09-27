@@ -8,7 +8,7 @@ Command on 2026-09-27:
 cd ops && npx tsc --noEmit && npm test
 ```
 
-Result: 48 passed, 0 failed. The 18 acceptance cases passed against the synthetic ledger. They do not prove a live connector.
+Result: 50 passed, 0 failed. The 20 acceptance cases passed against the synthetic ledger. They do not prove a live connector.
 
 | Scenario | Result |
 | --- | --- |

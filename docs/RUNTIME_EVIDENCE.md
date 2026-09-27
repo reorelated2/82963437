@@ -8,7 +8,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test` reported 48 passed, 0 failed. Eighteen of those are the buyer-conversion acceptance cases in `ops/test/acceptance.test.ts`.
+Typecheck passed. `npm test` reported 50 passed, 0 failed. Twenty of those are the buyer-conversion acceptance cases in `ops/test/acceptance.test.ts`. The supplied core prompt is stored at `policy/KYLEOS_CORE_PROMPT.md`.
 
 ## What the acceptance run actually did
 

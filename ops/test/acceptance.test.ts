@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createSyntheticAdapter, createUnverifiedLiveAdapter, type SyntheticAdapter } from '../src/runtime/adapters.ts';
 import { reconcileDue, takeOver, wake } from '../src/runtime/loop.ts';
+import { fieldOrderStatus } from '../src/runtime/capture.ts';
 import { openRuntime } from '../src/runtime/store.ts';
 import { UNRELEASED_POLICY, type Inbound, type ReleasePolicy } from '../src/runtime/types.ts';
 import type { SqlDb } from '../src/sql.ts';
@@ -171,9 +172,67 @@ test('an ownership change after the first plan is not sent to the stale owner', 
     signals: { recipientKey: 'phone:3055550188' },
   }), shared);
   assert.equal(changed.status, 'escalated');
+  assert.match(changed.blocker ?? '', /not overwritten/i);
+  const owner = db.get(`SELECT relationship_owner, stage FROM opportunities WHERE id = ?`, changed.opportunityId ?? '');
+  assert.equal(owner?.relationship_owner, 'Kyle Kleinman');
+  assert.equal(owner?.stage, 'ownership_paused');
+  const later = wake(db, inbound({ eventKey: 'owner-3', kind: 'reply', personKey: 'phone:3055550188', sourceVersion: 'v3', text: 'Saturday works.' }), shared);
+  assert.equal(later.status, 'escalated');
   assert.equal(channel.sends.length, 1);
   assert.equal(channel.sends[0].to, 'phone:3055550101');
   db.close();
+});
+
+test('an unavailable listing source is reported as a freshness gap', () => {
+  const db = tempDb();
+  const channel = createSyntheticAdapter();
+  const result = wake(db, inbound({
+    eventKey: 'stale-1',
+    kind: 'source_change',
+    actor: 'system',
+    text: 'Listing check for the North Miami house.',
+    signals: { listingUnavailable: true, listingLastVerifiedAt: '2026-09-20T14:00:00.000Z' },
+  }), ctx(channel));
+  assert.equal(channel.sends.length, 0);
+  assert.match(result.note ?? '', /Last verified 2026-09-20T14:00:00.000Z/);
+  assert.match(result.note ?? '', /unknown and was not invented/);
+  db.close();
+});
+
+test('a completed inspection is not collected revenue', () => {
+  const done = fieldOrderStatus({
+    inspectionComplete: true,
+    submitted: true,
+    qualityAccepted: false,
+    invoiced: false,
+    paymentTermsDays: null,
+    invoicedAt: null,
+    paymentReceivedAt: null,
+  }, NOW);
+  assert.equal(done.completion, 'complete');
+  assert.equal(done.payment, 'not_invoiced');
+  assert.equal(done.collectedRevenue, false);
+  const noTerms = fieldOrderStatus({
+    inspectionComplete: true,
+    submitted: true,
+    qualityAccepted: true,
+    invoiced: true,
+    paymentTermsDays: null,
+    invoicedAt: '2026-08-01T00:00:00.000Z',
+    paymentReceivedAt: null,
+  }, NOW);
+  assert.equal(noTerms.payment, 'terms_unknown');
+  assert.notEqual(noTerms.payment, 'overdue');
+  const paid = fieldOrderStatus({
+    inspectionComplete: true,
+    submitted: true,
+    qualityAccepted: true,
+    invoiced: true,
+    paymentTermsDays: 30,
+    invoicedAt: '2026-08-01T00:00:00.000Z',
+    paymentReceivedAt: '2026-08-20T00:00:00.000Z',
+  }, NOW);
+  assert.equal(paid.collectedRevenue, true);
 });
 
 test('listing access without buyer acknowledgment is not fully confirmed', () => {
@@ -195,6 +254,7 @@ test('listing access without buyer acknowledgment is not fully confirmed', () =>
   }), shared);
   assert.equal(access.showingFullyConfirmed, false);
   assert.ok(access.missingCheckpoints.includes('buyer_acknowledged'));
+  assert.deepEqual(access.checkpointOwners.find((item) => item.checkpoint === 'buyer_acknowledged'), { checkpoint: 'buyer_acknowledged', owner: 'buyer' });
   assert.match(access.message ?? '', /not a fully confirmed showing/i);
   db.close();
 });

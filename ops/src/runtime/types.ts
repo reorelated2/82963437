@@ -47,8 +47,19 @@ export interface Inbound {
     paperworkDone?: boolean;
     buyerAcknowledgedTime?: boolean;
     recipientKey?: string;
+    listingUnavailable?: boolean;
+    listingLastVerifiedAt?: string | null;
   };
 }
+
+export const CHECKPOINT_OWNERS: Record<ShowingCheckpoint, string> = {
+  requested: 'buyer',
+  access_approved: 'listing side',
+  agent_assigned: 'coordinator',
+  buyer_notified: 'agent',
+  buyer_acknowledged: 'buyer',
+  paperwork: 'Kyle Kleinman',
+};
 
 export interface SendReceipt {
   live: false | true;
@@ -91,6 +102,7 @@ export interface WakeResult {
   nextDueAt: string | null;
   showingFullyConfirmed: boolean;
   missingCheckpoints: ShowingCheckpoint[];
+  checkpointOwners: Array<{ checkpoint: ShowingCheckpoint; owner: string }>;
   blocker: string | null;
   questionId: string | null;
   steps: string[];

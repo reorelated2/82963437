@@ -1,6 +1,6 @@
 import { nextBusinessMorning, zonedParts } from '../time.ts';
 import type { ChannelAdapter, Inbound, ReleasePolicy, WakeResult } from './types.ts';
-import { SHOWING_CHECKPOINTS, type ShowingCheckpoint } from './types.ts';
+import { CHECKPOINT_OWNERS, SHOWING_CHECKPOINTS } from './types.ts';
 import { decide, missingCheckpoints, showingFullyConfirmed, type Decision } from './decide.ts';
 import {
   ambiguousClaim,
@@ -60,7 +60,6 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
   if (inbound.kind === 'source_change') {
     const patch: Record<string, string | number | null> = { source_version: inbound.sourceVersion };
     if (inbound.signals?.recipientKey) patch.person_key = inbound.signals.recipientKey;
-    if (inbound.relationshipOwner) patch.relationship_owner = inbound.relationshipOwner;
     if (inbound.displayName) patch.display_name = inbound.displayName;
     updateOpportunity(db, opp.id, patch, inbound.now);
     supersedeQueued(db, opp.id, inbound.now);
@@ -76,13 +75,20 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
     return stopped;
   }
 
-  if (inbound.relationshipOwner && inbound.relationshipOwner !== 'Kyle Kleinman') {
-    updateOpportunity(db, opp.id, { relationship_owner: inbound.relationshipOwner, stage: 'escalated', follow_up_due_at: null }, inbound.now);
+  if (inbound.relationshipOwner && inbound.relationshipOwner !== opp.relationshipOwner) {
+    const blocker = `Source reports owner ${inbound.relationshipOwner}. Record still says ${opp.relationshipOwner}. Paused for Kyle. Ownership was not overwritten.`;
+    updateOpportunity(db, opp.id, { stage: 'ownership_paused', follow_up_due_at: null, blocker }, inbound.now);
     supersedeQueued(db, opp.id, inbound.now);
-    const escalated = baseResult(opp.id, 'escalated', `Ownership changed to ${inbound.relationshipOwner}. No message was sent.`);
-    escalated.blocker = escalated.message;
+    const escalated = baseResult(opp.id, 'escalated', 'Ownership conflict. No message was sent.');
+    escalated.blocker = blocker;
     saveEventResult(db, inbound.eventKey, escalated);
     return escalated;
+  }
+  if (opp.stage === 'ownership_paused') {
+    const held = baseResult(opp.id, 'escalated', 'Ownership is still unresolved. Automatic outreach stays paused.');
+    held.blocker = opp.blocker;
+    saveEventResult(db, inbound.eventKey, held);
+    return held;
   }
 
   const pending = pendingWriteClaim(db, opp.id);
@@ -128,8 +134,8 @@ export function wake(db: SqlDb, inbound: Inbound, ctx: RuntimeContext): WakeResu
   }
 
   const current = loadOpportunityById(db, opp.id)!;
-  if (current.relationshipOwner !== 'Kyle Kleinman') {
-    const revised = baseResult(opp.id, 'escalated', 'Ownership changed before send. The stale plan was not used.');
+  if (current.stage === 'ownership_paused' || current.takeover === 'human' || current.suppression !== 'none') {
+    const revised = baseResult(opp.id, 'escalated', 'The record changed before send. The stale plan was not used.');
     supersedeQueued(db, opp.id, inbound.now);
     saveEventResult(db, inbound.eventKey, revised);
     return revised;
@@ -349,6 +355,7 @@ function finish(
   result.questionId = decision.questionId;
   result.steps = steps;
   result.missingCheckpoints = missingCheckpoints(fresh);
+  result.checkpointOwners = result.missingCheckpoints.map((checkpoint) => ({ checkpoint, owner: CHECKPOINT_OWNERS[checkpoint] }));
   result.showingFullyConfirmed = showingFullyConfirmed(fresh);
   result.nextDueAt = fresh.followUpDueAt;
   saveEventResult(db, inbound.eventKey, result);
@@ -367,6 +374,7 @@ function baseResult(opportunityId: string | null, status: WakeResult['status'], 
     nextDueAt: null,
     showingFullyConfirmed: false,
     missingCheckpoints: [...SHOWING_CHECKPOINTS],
+    checkpointOwners: SHOWING_CHECKPOINTS.map((checkpoint) => ({ checkpoint, owner: CHECKPOINT_OWNERS[checkpoint] })),
     blocker: null,
     questionId: null,
     steps: [],
