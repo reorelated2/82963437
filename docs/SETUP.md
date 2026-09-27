@@ -28,7 +28,7 @@ npm test
 npm start
 ```
 
-`npm run typecheck` should finish with no errors. `npm test` should finish with 25 passed and 0 failed.
+`npm run typecheck` should finish with no errors. `npm test` should finish with 30 passed and 0 failed.
 
 Expected result of `npm start`: a line that says `KyleOS Command (kleinman-lead-desk) running at http://127.0.0.1:8787`.
 

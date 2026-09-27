@@ -18,6 +18,12 @@ Stable ids are UUIDs. Source events store the raw text, a content hash, an optio
 
 Showing times use three roles: requested, available, and confirmed. A clock time is stored as an appointment only when the source gives a day word and am/pm. The role stays `requested` unless the source explicitly confirms it.
 
+## Inquiry agent
+
+A paste or screenshot runs the inquiry agent in `ops/src/agent.ts`. The run is stored in `agent_runs` and `agent_steps`. The tools, in order, are extract visible facts, match a contact, propose the package, read SEND / NOTE / NEXT, and refuse to send.
+
+Match uses a phone or an email. A name alone is a hold, not a merge. The agent does not have a send, Redfin write, MLS, or ShowingTime tool. `sent_messages` stays empty.
+
 ## Jobs and outbound
 
 Outbound automations start paused. Draft mode is the default. `sent_messages` exists so tests can prove a send did not happen. Jobs retry at most 3 times and failed jobs stay visible until acknowledged. There is no authorized send workflow, so turning pause off still does not send.

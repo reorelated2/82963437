@@ -12,6 +12,7 @@ Cursor owns the code in `ops/`. The handoff for the next session is this file pl
 
 Stage 1 of KyleOS Command, package name `kleinman-lead-desk`, at `ops/`.
 
+- The inquiry agent in `ops/src/agent.ts` runs extract, match, propose, read, and refuse-to-send. The run is stored.
 - Paste an inquiry or upload a screenshot. Only visible facts are extracted.
 - Facts are labeled said, confirmed, inferred, missing, or stale. Financing is not invented. A requested showing is not stored as confirmed.
 - Match on phone or email. A name alone, including a similar name, does not merge.
@@ -21,7 +22,7 @@ Stage 1 of KyleOS Command, package name `kleinman-lead-desk`, at `ops/`.
 - Draft only. Opt-out blocks the draft. `sent_messages` stays empty. Matches and drafts are written to `audit_log`.
 - SQLite file, export, and a tested backup/restore.
 - DEMO seed is labeled. It is not a live CRM.
-- 25 automated tests passing, plus a Chrome walkthrough. Board picture: `docs/screenshots/command-board.png`.
+- 30 automated tests passing, plus a Chrome walkthrough. Board picture: `docs/screenshots/command-board.png`.
 
 ## Verified
 
@@ -31,7 +32,7 @@ npx tsc --noEmit
 node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts
 ```
 
-Typecheck passed. Tests: 25 passed, 0 failed.
+Typecheck passed. Tests: 30 passed, 0 failed. Five of those run the inquiry agent.
 
 Chrome walkthrough passed for sign-in, the synthetic board, SEND / NOTE / NEXT, blocked send, saved note, no-next-action, search, a new paste, and a 390px layout. Details are in `docs/TEST_RESULTS.md`.
 

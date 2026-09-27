@@ -184,6 +184,29 @@ CREATE TABLE IF NOT EXISTS authorizations (
   authorized_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  intake_status TEXT,
+  review_id TEXT,
+  contact_id TEXT,
+  outcome TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_steps (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  tool TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  output_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
   at TEXT NOT NULL,

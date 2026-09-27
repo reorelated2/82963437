@@ -8,7 +8,7 @@ npx tsc --noEmit
 node --experimental-strip-types --experimental-sqlite --test --test-timeout=30000 test/lead-workflow.test.ts
 ```
 
-Result: typecheck passed. 25 tests passed, 0 failed.
+Result: typecheck passed. 30 tests passed, 0 failed. Five of those run the inquiry agent.
 
 | Check | Result |
 | --- | --- |
@@ -36,6 +36,7 @@ Result: typecheck passed. 25 tests passed, 0 failed.
 | Reply mid-sequence | Passed. A later message on the same phone does not restart with Hey. The next action is to answer the latest message. |
 | Opt out | Passed. The draft is blocked, send stays empty, and the audit log records the block. |
 | Eastern time after the fall clock change | Passed. Friday 2026-11-06 6:00 PM EST follows up Monday 2026-11-09 9:00 AM EST. |
+| Inquiry agent | Passed. The run stores extract, match, propose, read, and refuse-to-send. SEND and NEXT are prepared. `sent_messages` stays empty. A duplicate paste does not add a contact. Ambiguous text is held. A similar name is not matched. A name-only repeat is not merged. |
 
 ## Not tested with real clients
 
@@ -45,6 +46,8 @@ No real Redfin export, Gmail import, or MLS feed was used. Sample people are lab
 
 Checked in Chrome on 2026-09-24 against `http://127.0.0.1:8787` after signing in with the local password.
 
-Passed: rejected wrong password, KyleOS Command board, Load sample day with DEMO labels, Pat Nguyen under No next action, connector-blocked replies, ShowingTime Act explaining the block without sending, Nate Alvarez Act opening SEND / NOTE / NEXT, financing labeled Said, requested 5:30 left unconfirmed, Try to send blocked with "Nothing was sent.", Save note and follow up landing on Nate with the unsent note, Pat Nguyen Act opening that client, search by phone, a pasted Riley Chen Hollywood inquiry, and a 390px-wide layout with the nav at the bottom.
+Passed: rejected wrong password, KyleOS Command board, Load sample day with DEMO labels, Pat Nguyen under No next action, connector-blocked replies, ShowingTime Act explaining the block without sending, Nate Alvarez Act opening SEND / NOTE / NEXT, financing labeled Said, requested 5:30 left unconfirmed, Try to send blocked with "Nothing was sent.", Save note and follow up landing on Nate with the unsent note, Pat Nguyen Act opening that client, search by phone, and a 390px-wide layout with the nav at the bottom.
+
+A later Chrome pass ran the inquiry agent on a Riley Chen Hollywood paste. The trace showed Extract, Match, and Do not send. SEND, NOTE, and NEXT were on the review. Try to send still returned that nothing was sent.
 
 Board screenshot with synthetic data: `docs/screenshots/command-board.png`. Phone-width board: `docs/screenshots/command-board-mobile.png`.

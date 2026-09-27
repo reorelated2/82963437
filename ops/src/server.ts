@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { listAgentRuns, runInquiryAgent, getAgentRun } from './agent.ts';
 import { clearCookieHeader, cookieHeader, login, sessionValid } from './auth.ts';
 import { openDatabase } from './db.ts';
 import { decodeImage, readScreenshot } from './ocr.ts';
@@ -112,6 +113,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
   }
   if (method === 'GET' && path === '/api/contacts') return sendJson(res, 200, { contacts: searchContacts(db, url.searchParams.get('q') ?? '') });
   if (method === 'GET' && path.startsWith('/api/contacts/')) return sendContact(res, db, path.slice('/api/contacts/'.length));
+  if (method === 'POST' && path === '/api/agent/run') {
+    const body = await readJson(req);
+    const text = typeof body.text === 'string' ? body.text : '';
+    const key = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : null;
+    return sendJson(res, 200, runInquiryAgent(db, { text, sourceKind: 'paste', idempotencyKey: key }));
+  }
+  if (method === 'GET' && path === '/api/agent/runs') {
+    const reviewId = url.searchParams.get('reviewId');
+    return sendJson(res, 200, { runs: listAgentRuns(db, reviewId) });
+  }
+  if (method === 'GET' && path.startsWith('/api/agent/runs/')) {
+    const run = getAgentRun(db, decodeURIComponent(path.slice('/api/agent/runs/'.length)));
+    if (!run) return sendJson(res, 404, { error: 'Agent run not found.' });
+    return sendJson(res, 200, run);
+  }
   if (method === 'POST' && path === '/api/intake') {
     const body = await readJson(req);
     const text = typeof body.text === 'string' ? body.text : '';
@@ -173,7 +189,7 @@ async function intakeScreenshot(req: IncomingMessage, db: SqlDb, appRoot: string
       message: 'Screenshot reading is not available on this computer. Paste the text from the image instead. Nothing was saved as a contact.',
     };
   }
-  return intakeLead(db, {
+  return runInquiryAgent(db, {
     text: ocr.text,
     sourceKind: 'screenshot',
     ocrConfidence: ocr.confidence,

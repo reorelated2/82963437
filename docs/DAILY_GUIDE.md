@@ -18,7 +18,7 @@ DEMO means the row is a sample. Do not text a DEMO contact.
 
 1. Tap **New lead**.
 2. Paste the lead or the text thread.
-3. Tap **Add to review queue**.
+3. Tap **Run the inquiry agent**.
 
 Or choose a screenshot and tap **Read screenshot**.
 

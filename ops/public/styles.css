@@ -195,3 +195,4 @@ textarea { min-height: 220px; resize: vertical; }
   .sections { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .sections .wide { grid-column: 1 / -1; }
 }
+.trace-step { margin: 8px 0; }

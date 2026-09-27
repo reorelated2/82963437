@@ -1,6 +1,6 @@
 # KyleOS Command
 
-The Stage 1 app is the local package `kleinman-lead-desk` in `ops/`. The screen title is KyleOS Command. It turns a pasted inquiry or a screenshot into visible facts only, matches an existing contact by email or phone, and puts SEND, NOTE, and NEXT on the Daily Command board. It does not send texts or email. Redfin Partner Tools stays the system of record.
+The Stage 1 app is the local package `kleinman-lead-desk` in `ops/`. The screen title is KyleOS Command. The inquiry agent turns a pasted inquiry or a screenshot into visible facts only, matches an existing contact by email or phone, and puts SEND, NOTE, and NEXT on the Daily Command board. Each run is saved. The agent has no send tool. It does not send texts or email. Redfin Partner Tools stays the system of record.
 
 Sample people are labeled DEMO. They are not a live CRM.
 
@@ -24,7 +24,7 @@ npm start
 node --experimental-strip-types --experimental-sqlite --test test/*.ts
 ```
 
-Latest result on 2026-09-24: typecheck passed. `npm test` reported 25 passed, 0 failed.
+Latest result on 2026-09-27: typecheck passed. `npm test` reported 30 passed, 0 failed.
 
 Then open `http://127.0.0.1:8787`. Sign in with the local password from [Setup](docs/SETUP.md). The default is `local-kyle`. Click **Load sample day** to see the board. Screenshot of that synthetic board: [docs/screenshots/command-board.png](docs/screenshots/command-board.png).
 

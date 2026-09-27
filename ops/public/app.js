@@ -5,6 +5,7 @@ const state = {
   workspace: null,
   contact: null,
   review: null,
+  agentRun: null,
   results: [],
   query: '',
   notice: '',
@@ -62,6 +63,8 @@ async function openContact(id) {
 async function openReview(id) {
   try {
     state.review = await api(`/api/reviews/${id}`);
+    const listed = await api(`/api/agent/runs?reviewId=${encodeURIComponent(id)}`);
+    state.agentRun = (listed.runs && listed.runs[0]) || state.agentRun;
     state.view = 'review';
   } catch {
     state.error = 'That review could not be opened.';
@@ -228,22 +231,24 @@ function newLeadView() {
     el('label', { for: 'lead-text', text: 'Pasted lead' }),
     text,
     el('div', { class: 'actions' }, [
-      el('button', { class: 'primary', id: 'intake-submit', type: 'button', text: state.busy ? 'Saving' : 'Add to review queue', disabled: state.busy, onclick: () => submitText(text) }),
+      el('button', { class: 'primary', id: 'intake-submit', type: 'button', text: state.busy ? 'Working' : 'Run the inquiry agent', disabled: state.busy, onclick: () => submitText(text) }),
     ]),
     el('label', { for: 'screenshot-input', text: 'Or upload a screenshot' }),
     file,
     el('div', { class: 'actions' }, [
       el('button', { class: 'secondary', id: 'screenshot-submit', type: 'button', text: 'Read screenshot', onclick: () => submitImage(file) }),
     ]),
-    el('p', { class: 'empty', text: 'Missing facts stay marked Data needed. A requested showing is not treated as confirmed. Nothing is sent.' }),
+    el('p', { class: 'empty', text: 'The inquiry agent reads only visible facts, matches by email or phone, and prepares SEND, NOTE, and NEXT. It cannot text or email.' }),
   );
+  if (state.agentRun && !state.agentRun.reviewId) card.append(agentTrace(state.agentRun));
   return card;
 }
 
 async function submitText(text) {
   state.busy = true;
   render();
-  const result = await api('/api/intake', { method: 'POST', body: JSON.stringify({ text: text.value }) });
+  const result = await api('/api/agent/run', { method: 'POST', body: JSON.stringify({ text: text.value }) });
+  state.agentRun = result;
   showResult(result);
 }
 
@@ -280,6 +285,7 @@ function reviewView() {
   }
   const payload = review.payload || {};
   wrap.append(el('h2', { class: 'headline', text: review.title || 'Review' }));
+  if (state.agentRun) wrap.append(agentTrace(state.agentRun));
   if (review.isDemo) wrap.append(el('span', { class: 'pill demo', text: 'DEMO' }));
   wrap.append(el('p', { class: 'detail', text: payload.summary || payload.reason || '' }));
   if (payload.internalNote) wrap.append(el('section', { class: 'card' }, [el('h2', { text: 'Internal note' }), el('p', { text: payload.internalNote })]));
@@ -442,6 +448,31 @@ async function signIn(input) {
   state.error = '';
   location.hash = '#/today';
   await loadToday();
+}
+
+function agentTrace(run) {
+  const card = el('section', { class: 'card', id: 'agent-trace' });
+  card.append(el('h2', { text: 'Inquiry agent' }));
+  card.append(el('p', { class: 'empty', text: run.goal || 'Turn one visible inquiry into SEND, NOTE, and NEXT. Do not send it.' }));
+  const steps = run.steps || [];
+  for (const step of steps) {
+    const row = el('p', { class: 'trace-step' });
+    row.append(el('b', { text: `${step.position}. ${toolLabel(step.tool)}` }), document.createTextNode(` ${step.decision}`));
+    card.append(row);
+  }
+  if (run.send) card.append(el('p', { class: 'empty', text: run.send.reason || 'Nothing was sent.' }));
+  return card;
+}
+
+function toolLabel(tool) {
+  const labels = {
+    extract_visible_facts: 'Extract',
+    match_contact: 'Match',
+    propose_package: 'Propose',
+    read_package: 'Read SEND, NOTE, NEXT',
+    refuse_send: 'Do not send',
+  };
+  return labels[tool] || tool;
 }
 
 function basisLabel(fact) {

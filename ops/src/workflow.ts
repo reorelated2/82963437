@@ -1161,6 +1161,50 @@ function duplicateResult(db: SqlDb, event: Record<string, unknown>): IntakeResul
   };
 }
 
+export interface MatchPreview {
+  decision: 'no_identity' | 'identifier_conflict' | 'attach_phone' | 'attach_email' | 'attach_name_and_street' | 'hold_name_only' | 'create';
+  contactIds: string[];
+  reason: string;
+}
+
+export function previewMatch(db: SqlDb, extraction: Extraction): MatchPreview {
+  if (lacksIdentity(extraction)) {
+    return { decision: 'no_identity', contactIds: [], reason: 'No usable name, phone, or email is visible. No contact will be created.' };
+  }
+  const phone = phoneLookupKey(extraction.fields.phone.value);
+  const email = extraction.fields.email.status === 'known' ? extraction.fields.email.value?.toLowerCase() ?? null : null;
+  const phoneContact = findIdentifier(db, 'phone', phone);
+  const emailContact = findIdentifier(db, 'email', email);
+  if (phoneContact && emailContact && phoneContact !== emailContact) {
+    return {
+      decision: 'identifier_conflict',
+      contactIds: [phoneContact, emailContact],
+      reason: 'Phone and email point at two different contacts. They will not be merged.',
+    };
+  }
+  if (phoneContact) {
+    return { decision: 'attach_phone', contactIds: [phoneContact], reason: 'Matched an existing contact by phone. The name was not used to merge.' };
+  }
+  if (emailContact) {
+    return { decision: 'attach_email', contactIds: [emailContact], reason: 'Matched an existing contact by email. The name was not used to merge.' };
+  }
+  const name = extraction.fields.name.status === 'known' ? extraction.fields.name.value : null;
+  const address = extraction.fields.property_address.status === 'known' ? extraction.fields.property_address.value : null;
+  if (name && address && looksLikeStreet(address)) {
+    const exact = findNameAndStreet(db, name, address);
+    if (exact) {
+      return { decision: 'attach_name_and_street', contactIds: [exact], reason: 'Matched the name and the street together. A name alone would not merge.' };
+    }
+  }
+  if (name) {
+    const nameMatches = findNameMatches(db, name);
+    if (nameMatches.length > 0) {
+      return { decision: 'hold_name_only', contactIds: nameMatches, reason: 'The name matches someone already here. Phone and email do not, so nothing is merged.' };
+    }
+  }
+  return { decision: 'create', contactIds: [], reason: 'No email or phone match. A new reviewable contact can be created.' };
+}
+
 function findIdentifier(db: SqlDb, kind: string, normalized: string | null): string | null {
   if (!normalized) return null;
   const row = db.get(`SELECT contact_id FROM identifiers WHERE kind = ? AND value_normalized = ?`, kind, normalized);
