@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-09-24. Branch: `cursor/lead-follow-up-os-bef2`.
+Updated: 2026-09-27. Branch: `cursor/command-center-agents-bef2`. Mode: DRAFT. Autopilot is off. Handoff: `docs/REVENUE_HANDOFF.md`.
 
 This lane is the Buyer Command Center in `reorelated2/82963437`. It is not the inquiry CRM. Boundary: `docs/HANDOFF_BOUNDARY.md`.
 
