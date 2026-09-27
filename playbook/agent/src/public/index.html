@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Parts agent</title>
+  <style>
+    :root { color-scheme: light; --ink: #1c1915; --muted: #5c564c; --line: #ddd6c8; --paper: #f6f3ec; --card: #fff; --kill: #8d2f2f; --test: #0f6e56; --hold: #8a5a12; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.45 ui-sans-serif, system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+    header, main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 22px 0 8px; display: flex; justify-content: space-between; gap: 16px; align-items: end; }
+    h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; }
+    h2 { font-size: 16px; margin: 0 0 8px; }
+    p { margin: 0; color: var(--muted); }
+    .layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px 0 40px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    button, input, textarea, select { font: inherit; }
+    button { background: var(--ink); color: white; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    button:disabled { opacity: 0.5; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .opp { width: 100%; text-align: left; background: transparent; color: inherit; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 10px 4px; }
+    .opp strong { display: block; }
+    .pill { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 999px; }
+    .KILL { color: var(--kill); background: #f8e8e8; }
+    .TEST, .LIVE, .SCALE { color: var(--test); background: #e5f4ef; }
+    .HOLD, .IMPROVE { color: var(--hold); background: #f8efdc; }
+    .next { background: #10261f; color: #f3f7f5; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    .next p { color: #d5e4de; }
+    pre { white-space: pre-wrap; background: #f3efe6; padding: 10px; border-radius: 8px; font-size: 12px; }
+    label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    input, textarea, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: white; color: var(--ink); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .kpis { display: flex; gap: 16px; flex-wrap: wrap; }
+    .kpis div { min-width: 90px; }
+    .kpis b { display: block; font-size: 18px; }
+    .today li { margin: 6px 0; }
+    @media (max-width: 860px) { .layout, .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Parts agent</h1>
+      <p>Runs the playbook. It will not invent a sales number, clear a patent, or list a second SKU early.</p>
+    </div>
+    <div class="row">
+      <button class="secondary" id="weekly" type="button">Friday review</button>
+      <button class="secondary" id="reload" type="button">Reload</button>
+    </div>
+  </header>
+  <main class="layout">
+    <section>
+      <article class="card" style="margin-bottom:12px">
+        <h2>Today</h2>
+        <ul class="today" id="today"></ul>
+      </article>
+      <article class="card" style="margin-bottom:12px">
+        <h2>Orders you have</h2>
+        <div class="kpis" id="kpis"></div>
+      </article>
+      <article class="card">
+        <h2>Catalog</h2>
+        <div id="list"></div>
+      </article>
+    </section>
+    <section id="work">
+      <article class="card"><p>Select a row.</p></article>
+    </section>
+  </main>
+  <script>
+    let state = null;
+    let selected = "cycle-knob";
+
+    async function api(path, options) {
+      const response = await fetch(path, { headers: { "content-type": "application/json" }, ...options });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Request failed");
+      return payload;
+    }
+
+    async function load() {
+      state = await api("/api/state");
+      draw();
+    }
+
+    function draw() {
+      document.querySelector("#today").innerHTML = state.today.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+      const k = state.kpis;
+      document.querySelector("#kpis").innerHTML = [
+        ["Revenue", money(k.revenue)],
+        ["Units", k.units],
+        ["Returns", k.return_rate == null ? "—" : `${Math.round(k.return_rate * 100)}%`],
+        ["ASP", k.average_selling_price == null ? "—" : money(k.average_selling_price)],
+      ].map(([name, value]) => `<div><b>${value}</b>${name}</div>`).join("");
+      document.querySelector("#list").innerHTML = state.opportunities.map((row) => `
+        <button class="opp" data-id="${row.id}" type="button">
+          <span class="row"><strong>${escapeHtml(row.product)}</strong><span class="pill ${row.verdict}">${row.verdict}</span></span>
+          <span>${row.stage} · score ${row.score} · ${row.volume_note}</span>
+        </button>`).join("");
+      const current = state.opportunities.find((row) => row.id === selected) || state.opportunities[0];
+      selected = current?.id;
+      drawWork(current);
+    }
+
+    function drawWork(row) {
+      if (!row) return;
+      const next = row.artifacts?.next;
+      const econ = row.economics;
+      document.querySelector("#work").innerHTML = `
+        <div class="next">
+          <div class="row"><span class="pill ${next?.code === "killed" ? "KILL" : "TEST"}">${escapeHtml(next?.code || row.stage)}</span><strong>${escapeHtml(row.product)}</strong></div>
+          <p>${escapeHtml(next?.message || "Run the agent.")}</p>
+          <div class="row" style="margin-top:10px"><button id="run" type="button">Run agent</button></div>
+        </div>
+        <article class="card" style="margin-bottom:12px">
+          <h2>Economics ${econ ? "" : "not run"}</h2>
+          ${econ ? `<div class="kpis">
+            <div><b>${money(econ.cash_contribution)}</b>Cash contribution</div>
+            <div><b>${money(econ.cash_profit_per_printer_hour)}</b>Per printer hour</div>
+            <div><b>${money(econ.contribution_after_owner_labor)}</b>After your time</div>
+            <div><b>${money(econ.price)}</b>Price</div>
+          </div><p>${escapeHtml(econ.label || "")}</p>` : `<p>${row.grams || "?"} g · ${row.minutes || "?"} min · ${row.material}. Run the agent after evidence is in.</p>`}
+        </article>
+        <article class="card" style="margin-bottom:12px">
+          <h2>Evidence</h2>
+          <p>eBay sold ${row.evidence.ebaySold.length} · Amazon ${row.evidence.amazon.length} · patent note ${row.evidence.patentNote ? "written" : "missing"}</p>
+          <form id="evidence">
+            <label>eBay sold rows, one per line: price | title | yes if the shaft is visible<textarea name="ebay" rows="4" placeholder="28.50 | dryer timer knob D shaft | yes"></textarea></label>
+            <label>Amazon comps, one per line: price | reviews | stars<textarea name="amazon" rows="3" placeholder="24.99 | 40 | 4.4"></textarea></label>
+            <label>Patent search result<input name="patent" placeholder="Searched dryer knob. No active patent found that reads on a plain D-shaft knob." /></label>
+            <label class="row"><input type="checkbox" name="thin" /> Fewer than 10 sold listings were on the page. I am recording that as thin evidence, not as zero demand.</label>
+            <button type="submit">Save evidence and run</button>
+          </form>
+        </article>
+        <article class="card" style="margin-bottom:12px">
+          <h2>Donor measurements</h2>
+          <form id="measure" class="grid">
+            <label>Shaft or mating feature<input name="shaft" placeholder="D-shaft 6.2 mm flat-to-flat" /></label>
+            <label>Second reading<input name="reading_2" placeholder="6.1 mm" /></label>
+            <label>Third reading<input name="reading_3" placeholder="6.2 mm" /></label>
+            <label>Models fitted<input name="models" placeholder="model sticker you read" /></label>
+            <button type="submit">Save measurements and run</button>
+          </form>
+        </article>
+        <article class="card" style="margin-bottom:12px">
+          <h2>Fit test and orders</h2>
+          <form id="fit" class="row">
+            <select name="passed"><option value="yes">Fit passed</option><option value="no">Fit failed</option></select>
+            <input name="grams" placeholder="grams" size="6" />
+            <input name="minutes" placeholder="minutes" size="8" />
+            <input name="notes" placeholder="what changed" />
+            <button type="submit">Record fit and run</button>
+          </form>
+          <form id="sale" class="row" style="margin-top:8px">
+            <input name="revenue" placeholder="revenue" size="8" />
+            <input name="postage" placeholder="postage" size="8" />
+            <label class="row"><input type="checkbox" name="refunded" /> Return</label>
+            <input name="reason" placeholder="fit / other" />
+            <button class="secondary" type="submit">Record one order</button>
+          </form>
+        </article>
+        <article class="card" style="margin-bottom:12px">
+          <h2>New complaint</h2>
+          <form id="intake" class="grid">
+            <label>Product<input name="product" required /></label>
+            <label>Search phrase<input name="phrase" /></label>
+            <label>Buyer problem<textarea name="problem" required></textarea></label>
+            <label>Price if you have a guess<input name="price" /></label>
+            <button type="submit">Intake and run</button>
+          </form>
+        </article>
+        ${row.artifacts?.cadBrief ? `<article class="card" style="margin-bottom:12px"><h2>CAD brief</h2><pre>${escapeHtml(row.artifacts.cadBrief)}</pre></article>` : ""}
+        ${row.artifacts?.listing ? `<article class="card" style="margin-bottom:12px"><h2>Listing draft</h2><pre>${escapeHtml(JSON.stringify(row.artifacts.listing, null, 2))}</pre></article>` : ""}
+        ${row.artifacts?.slip ? `<article class="card"><h2>Pack slip</h2><pre>${escapeHtml(row.artifacts.slip)}</pre></article>` : ""}
+      `;
+      document.querySelector("#run").onclick = () => act(() => api(`/api/opportunities/${row.id}/run`, { method: "POST" }));
+      document.querySelector("#evidence").onsubmit = (event) => {
+        event.preventDefault();
+        const data = new FormData(event.target);
+        const payload = { thinEvidence: data.get("thin") === "on" };
+        const ebay = parseLines(data.get("ebay"), (parts) => ({ price: parts[0], title: parts[1] || "", shaftVisible: /^y/i.test(parts[2] || "") }));
+        const amazon = parseLines(data.get("amazon"), (parts) => ({ price: parts[0], reviews: parts[1] || 0, stars: parts[2] || 0 }));
+        if (ebay.length) payload.ebaySold = ebay;
+        if (amazon.length) payload.amazon = amazon;
+        if (String(data.get("patent") || "").trim()) payload.patentNote = data.get("patent");
+        act(() => api(`/api/opportunities/${row.id}/evidence`, { method: "POST", body: JSON.stringify(payload) }));
+      };
+      document.querySelector("#measure").onsubmit = (event) => {
+        event.preventDefault();
+        const data = new FormData(event.target);
+        const models = data.get("models");
+        act(async () => {
+          return api(`/api/opportunities/${row.id}/measure`, { method: "POST", body: JSON.stringify({
+            shaft: data.get("shaft"), reading_2: data.get("reading_2"), reading_3: data.get("reading_3"), models,
+          }) });
+        });
+      };
+      document.querySelector("#fit").onsubmit = (event) => {
+        event.preventDefault();
+        const data = new FormData(event.target);
+        act(() => api(`/api/opportunities/${row.id}/fit`, { method: "POST", body: JSON.stringify({
+          passed: data.get("passed") === "yes", grams: data.get("grams"), minutes: data.get("minutes"), notes: data.get("notes"),
+        }) }));
+      };
+      document.querySelector("#sale").onsubmit = (event) => {
+        event.preventDefault();
+        const data = new FormData(event.target);
+        act(() => api(`/api/opportunities/${row.id}/sale`, { method: "POST", body: JSON.stringify({
+          revenue: data.get("revenue"), postage: data.get("postage"), refunded: data.get("refunded") === "on", reason: data.get("reason"), units: 1,
+        }) }));
+      };
+      document.querySelector("#intake").onsubmit = (event) => {
+        event.preventDefault();
+        const data = new FormData(event.target);
+        act(async () => {
+          const result = await api("/api/intake", { method: "POST", body: JSON.stringify(Object.fromEntries(data.entries())) });
+          selected = result.opportunity.id;
+          return result;
+        });
+      };
+    }
+
+    async function act(fn) {
+      try {
+        await fn();
+        await load();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    function parseLines(text, map) {
+      return String(text || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => map(line.split("|").map((part) => part.trim())));
+    }
+
+    function money(value) {
+      if (value == null || Number.isNaN(Number(value))) return "—";
+      return `$${Number(value).toFixed(2)}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[char]));
+    }
+
+    document.querySelector("#list").onclick = (event) => {
+      const button = event.target.closest(".opp");
+      if (!button) return;
+      selected = button.dataset.id;
+      draw();
+    };
+    document.querySelector("#reload").onclick = () => load();
+    document.querySelector("#weekly").onclick = async () => {
+      const review = await api("/api/weekly", { method: "POST" });
+      const lines = review.cards.slice(0, 8).map((card) => `${card.product}: ${card.decision.verdict} — ${card.decision.reason}`);
+      alert(lines.join("\n\n") || "No cards.");
+      await load();
+    };
+    load().catch((error) => { document.body.insertAdjacentHTML("beforeend", `<p>${escapeHtml(error.message)}</p>`); });
+  </script>
+</body>
+</html>

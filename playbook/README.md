@@ -19,6 +19,15 @@ Read in this order:
 | [06-founders-playbook.md](06-founders-playbook.md) | The one-page checklist from today through $25,000 a month. |
 | [templates/opportunity-sheet.csv](templates/opportunity-sheet.csv) | The sheet you fill every week. |
 | [tools/unit_economics.py](tools/unit_economics.py) | The formulas behind the worked examples. |
+| [agent/](agent/) | The operator that runs those workflows. |
+
+Run the agent:
+
+```bash
+cd playbook/agent && npm test && npm start
+```
+
+Open `http://127.0.0.1:8091`. It scores, prices, blocks banned parts, writes the CAD brief and the listing, and stops when a human has to measure a donor or read a patent. It does not invent sales volume.
 
 Fees, filament prices, and postage change. Every dollar figure in here is labeled **FACT**, **ESTIMATE**, **ASSUMPTION**, or **RECOMMENDATION**. Before you buy inventory or turn on ads, replace the estimates with the number Amazon, eBay, your utility, and your postage account show you that day.
 
