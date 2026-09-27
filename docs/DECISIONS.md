@@ -5,6 +5,7 @@ Updated: 2026-09-24. These are the choices already made for the first working de
 | Decision | Why |
 | --- | --- |
 | This repo stays the Buyer Command Center. Stage 1 SEND/NOTE/NEXT is the other agent's product. | Kyle kept both agents. `ENABLE_LEAD_DESK` stays unset so this server does not compete as the CRM. See `docs/HANDOFF_BOUNDARY.md`. |
+| Consult, market, and MLS are three local agents. | Kyle asked to build this surface into agents. They run in this process. They do not call a paid agent host, and they refuse client messaging. |
 | One local Node process, SQLite, and a page at `http://127.0.0.1:8080` | Smallest setup that stores records, survives a restart, and does not need a paid account. The page is no longer mounted. |
 | Redfin stays the system of record | This desk holds working copies and notes to paste. It does not write to Redfin. |
 | There is no separate Grok bot | This session is Grok inside Cursor. It can edit this repo. It cannot operate Kyle's computer, log into Redfin, or message another Cursor window. |
