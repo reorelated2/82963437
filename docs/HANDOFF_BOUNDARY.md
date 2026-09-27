@@ -13,6 +13,7 @@ Owns:
 - Strategy draft: `POST /strategy`. Needs `OPENAI_API_KEY`. Not connected. It does not text a client.
 - Client save: `POST /clients`. Needs Supabase. Not connected.
 - MLS helpers: `GET /mls/hiram-zone` and `POST /mls/analyze`. The Hiram payload is a labeled DEMO seed. Analyze only ranks listings the caller supplies. There is no live MLS feed and no Redfin private API.
+- Revenue desk: `GET /revenue`, `GET /revenue/desk`, and the `POST /revenue/*` procedure routes. They draft the next step from facts Kyle pastes. They do not store leads and they do not send messages. Playbook: `docs/REVENUE_OPS.md`.
 
 The Redfin page collector stays off unless `RUN_REDFIN_COLLECTOR=true`. Do not turn that on for this product.
 

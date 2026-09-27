@@ -16,5 +16,6 @@ Updated: 2026-09-24. These are the choices already made for the first working de
 | Priority comes from stated behavior | A requested, unconfirmed showing, or a stated near timeline (ASAP, this month, or 30), is why someone is "most likely to move." Protected characteristics are not used. |
 | Income is not calculated yet | $250K net is a planning target. Gross commission, brokerage compensation, expenses, taxes, and net income stay "Data needed" until Kyle supplies those assumptions. |
 | Held appointments and response time stay blank | Missing data is null, not zero. |
+| 2026-09-27: Revenue routes live on this server and stay stateless | Kyle asked for one procedure across Redfin, Capture, pricing, offers, PDC evidence, and Miami Pulse. `GET /revenue` does that without mounting the inquiry board, without a database, and without a send path. Benchmarks are not agreed fees. $250K net by April 30, 2027 stays a planning target. |
 | A reply or opt-out closes the previous follow up | The earlier draft is cancelled so two texts are not waiting. Nothing is sent. |
 | Follow-up times use America/New_York | 9:00 Eastern is 9:00 on both the March and November daylight-saving dates in 2026. |

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Revenue desk</title>
+  <style>
+    :root { color-scheme: light; font-family: Georgia, "Times New Roman", serif; }
+    body { margin: 0; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
+    h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
+    p { line-height: 1.45; }
+    .banner { background: #fff; border: 1px solid #d9d2c5; padding: 0.8rem 1rem; }
+    label { display: block; font-size: 0.85rem; margin: 0.7rem 0 0.2rem; }
+    input, select, textarea, button { width: 100%; box-sizing: border-box; font: inherit; padding: 0.55rem; }
+    textarea { min-height: 5rem; }
+    button { margin-top: 1rem; background: #1c1915; color: #fff; border: 0; }
+    section { margin-top: 1.25rem; background: #fff; border: 1px solid #d9d2c5; padding: 1rem; }
+    h2 { font-size: 1.05rem; margin: 0 0 0.4rem; }
+    pre { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+    ul { padding-left: 1.1rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Revenue desk</h1>
+    <div class="banner">
+      <p>Nothing was sent from this page. It does not text anyone or write to Redfin.</p>
+      <p id="intro">Loading the next step.</p>
+    </div>
+    <form id="lead">
+      <label for="person">Person</label>
+      <input id="person" name="person" autocomplete="name" />
+      <label for="phone">Phone</label>
+      <input id="phone" name="phone" autocomplete="tel" />
+      <label for="email">Email</label>
+      <input id="email" name="email" autocomplete="email" />
+      <label for="leadSource">Lead source</label>
+      <input id="leadSource" name="leadSource" />
+      <label for="property">Property they asked about</label>
+      <input id="property" name="property" />
+      <label for="reason">Why they reached out, only if they said it</label>
+      <input id="reason" name="reason" />
+      <label for="location">Location</label>
+      <input id="location" name="location" />
+      <label for="criteria">Property criteria</label>
+      <input id="criteria" name="criteria" />
+      <label for="budget">Budget</label>
+      <input id="budget" name="budget" />
+      <label for="payment">Cash or financing</label>
+      <select id="payment" name="payment">
+        <option value="">Not stated</option>
+        <option value="cash">Cash</option>
+        <option value="financing">Financing</option>
+      </select>
+      <label for="preapproval">Preapproval</label>
+      <select id="preapproval" name="preapproval">
+        <option value="">Not stated</option>
+        <option value="preapproved">Preapproved</option>
+        <option value="prequalified">Prequalified</option>
+        <option value="none">None</option>
+      </select>
+      <label for="timeline">Timeline</label>
+      <input id="timeline" name="timeline" />
+      <label for="decisionMakers">Decision makers</label>
+      <input id="decisionMakers" name="decisionMakers" />
+      <label for="tourRequested">Tour requested</label>
+      <input id="tourRequested" name="tourRequested" />
+      <label for="tourConfirmed">Tour confirmed</label>
+      <input id="tourConfirmed" name="tourConfirmed" />
+      <label for="actor">Last contact was</label>
+      <select id="actor" name="actor">
+        <option value="none">No contact recorded</option>
+        <option value="kyle">Kyle</option>
+        <option value="coordinator">Coordinator</option>
+        <option value="client">Client</option>
+      </select>
+      <label for="summary">What that contact actually was</label>
+      <input id="summary" name="summary" />
+      <label for="activity">Portal or site activity, if any</label>
+      <input id="activity" name="activity" />
+      <label for="stage">Stage, if you already know it</label>
+      <select id="stage" name="stage">
+        <option value="">Derive it</option>
+        <option>new</option>
+        <option>qualifying</option>
+        <option>search</option>
+        <option>tour_requested</option>
+        <option>tour_confirmed</option>
+        <option>offer</option>
+        <option>contract</option>
+        <option>closing</option>
+        <option>past</option>
+        <option>paused</option>
+      </select>
+      <label for="language">Language they asked for</label>
+      <select id="language" name="language">
+        <option value="en">English</option>
+        <option value="es">Spanish, because they asked</option>
+      </select>
+      <button type="submit">Prepare the next step</button>
+    </form>
+    <section id="result" hidden>
+      <h2>Next</h2>
+      <p id="next"></p>
+      <h2>Draft</h2>
+      <p id="objective"></p>
+      <pre id="draft"></pre>
+      <h2>Agent Tools note</h2>
+      <pre id="note"></pre>
+      <h2>Follow up</h2>
+      <p id="follow"></p>
+      <h2>Facts</h2>
+      <ul id="facts"></ul>
+      <h2>Estimates</h2>
+      <ul id="estimates"></ul>
+      <h2>Data needed</h2>
+      <ul id="needed"></ul>
+    </section>
+  </main>
+  <script>
+    const intro = document.querySelector("#intro");
+    fetch("/revenue").then((res) => res.json()).then((body) => {
+      intro.textContent = body.nextStep;
+    }).catch(() => {
+      intro.textContent = "The desk did not load. Nothing was sent.";
+    });
+
+    function list(id, items) {
+      const node = document.querySelector(id);
+      node.replaceChildren();
+      for (const item of items.length ? items : ["None"]) {
+        const li = document.createElement("li");
+        li.textContent = item;
+        node.append(li);
+      }
+    }
+
+    document.querySelector("#lead").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = Object.fromEntries(new FormData(form).entries());
+      const actor = data.actor;
+      const payload = {
+        person: data.person,
+        phone: data.phone,
+        email: data.email,
+        leadSource: data.leadSource,
+        property: data.property,
+        reason: data.reason,
+        location: data.location,
+        criteria: data.criteria,
+        budget: data.budget,
+        payment: data.payment || null,
+        preapproval: data.preapproval || null,
+        timeline: data.timeline,
+        decisionMakers: data.decisionMakers,
+        tourRequested: data.tourRequested,
+        tourConfirmed: data.tourConfirmed,
+        activity: data.activity,
+        stage: data.stage || null,
+        language: data.language,
+        lastContact: actor === "none" ? { actor: "none" } : { actor, summary: data.summary, channel: "unknown" },
+      };
+      const res = await fetch("/revenue/procedure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json();
+      document.querySelector("#result").hidden = false;
+      document.querySelector("#next").textContent = body.nextAction;
+      document.querySelector("#objective").textContent = body.draft ? body.draft.objective : "No draft. Do not send anything.";
+      document.querySelector("#draft").textContent = body.draft ? body.draft.body : "No message was created.";
+      document.querySelector("#note").textContent = body.agentToolsNote;
+      document.querySelector("#follow").textContent = body.followUp.trigger;
+      list("#facts", body.facts);
+      list("#estimates", body.estimates);
+      list("#needed", body.dataNeeded);
+    });
+  </script>
+</body>
+</html>

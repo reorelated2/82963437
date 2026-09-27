@@ -27,6 +27,15 @@ test("the command center does not mount the inquiry board or a send route", asyn
     const send = await fetch(`${base}/api/os/drafts/any/send`, { method: "POST" });
     assert.equal(send.status, 404);
 
+    const revenue = await fetch(`${base}/revenue`);
+    const playbook = (await revenue.json()) as { sent: boolean; messaging: string; pipeline: string };
+    assert.equal(revenue.status, 200);
+    assert.equal(playbook.sent, false);
+    assert.match(playbook.messaging, /No client messaging/);
+    assert.match(playbook.pipeline, /No live lead/);
+    const revenueSend = await fetch(`${base}/revenue/procedure/send`, { method: "POST" });
+    assert.equal(revenueSend.status, 404);
+
     const hiram = await fetch(`${base}/mls/hiram-zone`);
     const zone = (await hiram.json()) as { demo: boolean; notice: string; totals: { active: number } };
     assert.equal(zone.demo, true);

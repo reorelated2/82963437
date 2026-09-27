@@ -1,5 +1,17 @@
 # Test results
 
+## This lane, 2026-09-27 (revenue desk)
+
+Command, from `backend`:
+
+```bash
+npm run typecheck && npm test
+```
+
+Result: typecheck passed. 33 passed, 0 failed. Eleven of those checks cover the revenue procedure. No live client was loaded. No message was sent.
+
+`GET /revenue` returns `sent: false` and says no live lead is loaded. `POST /revenue/procedure/send` is HTTP 404. `GET /revenue/desk` returns the paste form and states that nothing was sent.
+
 ## This lane, 2026-09-24 (Buyer Command Center)
 
 Command, from `backend`:

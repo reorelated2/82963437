@@ -11,6 +11,7 @@ import { startCollectorSchedule } from './collector/scheduler.js';
 import { analyzeMlsFeeds, getHiramSeedAnalysis, type MlsListing } from './lib/mlsAnalyzer.js';
 import { mountOs } from './os/routes.js';
 import { openDesk } from './os/workflow.js';
+import { mountRevenue } from './revenue/routes.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public');
 
@@ -30,13 +31,15 @@ export function createApp(): express.Express {
     app.get('/', (_req, res) => {
       res.json({
         product: 'South Florida Buyer Command Center',
-        lane: 'Consult intake, cached market metrics, and MLS analyze helpers.',
+        lane: 'Consult intake, cached market metrics, MLS analyze helpers, and a stateless revenue desk.',
         leadDesk: 'Not mounted. Inquiry SEND/NOTE/NEXT belongs to the other agent. See docs/HANDOFF_BOUNDARY.md.',
         messaging: 'No client messaging on this server.',
-        routes: ['/health', '/markets/:city', '/strategy', '/mls/hiram-zone', '/mls/analyze', '/clients'],
+        routes: ['/health', '/revenue', '/revenue/desk', '/markets/:city', '/strategy', '/mls/hiram-zone', '/mls/analyze', '/clients'],
       });
     });
   }
+
+  mountRevenue(app);
 
   app.get('/health', (_req, res) => res.json({ ok: true, product: 'buyer-command-center', leadDeskMounted: leadDeskEnabled() }));
 
