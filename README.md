@@ -8,7 +8,16 @@ The other agent owns Stage 1 (paste a lead, then SEND / NOTE / NEXT). That bound
 cd backend && npm install && npm run dev
 ```
 
-Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board. `GET /mls/hiram-zone` is a labeled DEMO seed. Nothing on this server sends a client message.
+Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board.
+
+Agents on this server:
+
+1. Open `http://127.0.0.1:8080/agents` to see consult, market, and mls.
+2. To score a consult, POST the answers to `/agents/consult`. Blank financing stays blank. "Need Lender" is not approval.
+3. To rank a labeled sample, POST `{"demoSeed": true}` to `/agents/mls`. That sample is demo, not live inventory.
+4. Market numbers stay blocked until Supabase is connected. The agent does not invent prices.
+
+Nothing on this server sends a client message. A request to draft or send a text is refused.
 
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 

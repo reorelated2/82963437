@@ -6,6 +6,7 @@ This lane is the Buyer Command Center in `reorelated2/82963437`. It is not the i
 
 ## BUILT
 
+- Three agents: consult, market, and mls, at `GET /agents` and `POST /agents/:name`.
 - Consult, market, strategy, and client routes remain in `backend/src/server.ts` and `mobile/`.
 - `GET /mls/hiram-zone` returns the existing seed and now marks it `demo: true`.
 - `POST /mls/analyze` ranks only listings the caller supplies. It says it is not a live MLS connection.
@@ -13,9 +14,9 @@ This lane is the Buyer Command Center in `reorelated2/82963437`. It is not the i
 
 ## VERIFIED
 
-`cd backend && npx tsc --noEmit && npm test` — typecheck passed, 22 passed, 0 failed.
+`cd backend && ./node_modules/.bin/tsc --noEmit && npm test` — typecheck passed, 28 passed, 0 failed.
 
-On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Command Center and says the lead desk is not mounted. `GET /health` has `leadDeskMounted: false`. `GET /api/os/workspace` is HTTP 404. `GET /mls/hiram-zone` is `demo: true` with 18 active rows out of 20. Evidence is in `docs/TEST_RESULTS.md`.
+On the running process at `http://127.0.0.1:8080` on 2026-09-27: `GET /agents` lists consult, market, and mls. A Need Lender consult returned readiness 26 and said that is not an approval. A request to send a text returned HTTP 400. `POST /agents/mls` with `demoSeed: true` stayed labeled DEMO. `GET /api/os/workspace` is HTTP 404. Evidence is in `docs/TEST_RESULTS.md`.
 
 ## BLOCKED
 
