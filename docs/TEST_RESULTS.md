@@ -12,6 +12,8 @@ Result: typecheck passed. 33 passed, 0 failed. Eleven of those checks cover the 
 
 `GET /revenue` returns `sent: false` and says no live lead is loaded. `POST /revenue/procedure/send` is HTTP 404. `GET /revenue/desk` returns the paste form and states that nothing was sent.
 
+On `http://127.0.0.1:8080` the same day: homepage lead desk not mounted, `/health` `leadDeskMounted: false`, `/api/os/workspace` 404, Hiram seed `demo: true` with 18 active of 20. A headless Chromium page at a phone width submitted `/revenue/desk`. An empty form said to identify the person and created no message. A coordinator-only packet drafted one question and did not treat that contact as Kyle's. `Tuesday 5:30` stayed a request until confirmed. Filled criteria produced a search step and attached no listings.
+
 ## This lane, 2026-09-24 (Buyer Command Center)
 
 Command, from `backend`:

@@ -16,7 +16,7 @@ This lane is the Buyer Command Center in `reorelated2/82963437`. It is not the i
 
 `cd backend && npm run typecheck && npm test` — typecheck passed, 33 passed, 0 failed.
 
-On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Command Center and says the lead desk is not mounted. `GET /health` has `leadDeskMounted: false`. `GET /api/os/workspace` is HTTP 404. `GET /mls/hiram-zone` is `demo: true` with 18 active rows out of 20. Evidence is in `docs/TEST_RESULTS.md`.
+On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Command Center and says the lead desk is not mounted. `GET /health` has `leadDeskMounted: false`. `GET /api/os/workspace` is HTTP 404. `GET /mls/hiram-zone` is `demo: true` with 18 active rows out of 20. `GET /revenue` has `sent: false` and no live lead. A headless browser submitted the desk form for an unnamed inquiry, a coordinator-only lead, an unconfirmed tour, and confirmed search criteria. Each result stayed a draft. Evidence is in `docs/TEST_RESULTS.md`.
 
 ## BLOCKED
 
