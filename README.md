@@ -8,7 +8,7 @@ The other agent owns Stage 1 (paste a lead, then SEND / NOTE / NEXT). That bound
 cd backend && npm install && npm run dev
 ```
 
-Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board. `GET /mls/hiram-zone` is a labeled DEMO seed. Nothing on this server sends a client message.
+Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board. `GET /revenue/desk` is the revenue procedure. It drafts a next step from facts you paste and does not send the message. `GET /mls/hiram-zone` is a labeled DEMO seed. Nothing on this server sends a client message.
 
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 

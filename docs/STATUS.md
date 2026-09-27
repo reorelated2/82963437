@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-09-24. Branch: `cursor/lead-follow-up-os-bef2`.
+Updated: 2026-09-27. Branch: `cursor/revenue-ops-framework-64e8`.
 
 This lane is the Buyer Command Center in `reorelated2/82963437`. It is not the inquiry CRM. Boundary: `docs/HANDOFF_BOUNDARY.md`.
 
@@ -10,12 +10,13 @@ This lane is the Buyer Command Center in `reorelated2/82963437`. It is not the i
 - `GET /mls/hiram-zone` returns the existing seed and now marks it `demo: true`.
 - `POST /mls/analyze` ranks only listings the caller supplies. It says it is not a live MLS connection.
 - The inquiry board under `backend/src/os` is not mounted. `ENABLE_LEAD_DESK` is unset on purpose.
+- `GET /revenue` and `GET /revenue/desk` run a stateless revenue procedure for Redfin follow up, Capture quotes, pricing, offers, evidence, Pulse notes, and priority. Nothing is stored or sent. See `docs/REVENUE_OPS.md`.
 
 ## VERIFIED
 
-`cd backend && npx tsc --noEmit && npm test` — typecheck passed, 22 passed, 0 failed.
+`cd backend && npm run typecheck && npm test` — typecheck passed, 33 passed, 0 failed.
 
-On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Command Center and says the lead desk is not mounted. `GET /health` has `leadDeskMounted: false`. `GET /api/os/workspace` is HTTP 404. `GET /mls/hiram-zone` is `demo: true` with 18 active rows out of 20. Evidence is in `docs/TEST_RESULTS.md`.
+On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Command Center and says the lead desk is not mounted. `GET /health` has `leadDeskMounted: false`. `GET /api/os/workspace` is HTTP 404. `GET /mls/hiram-zone` is `demo: true` with 18 active rows out of 20. `GET /revenue` has `sent: false` and no live lead. A headless browser submitted the desk form for an unnamed inquiry, a coordinator-only lead, an unconfirmed tour, and confirmed search criteria. Each result stayed a draft. Evidence is in `docs/TEST_RESULTS.md`.
 
 ## BLOCKED
 
@@ -27,4 +28,4 @@ On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Comma
 
 ## NEXT
 
-Leave Stage 1 (inquiry, SEND, NOTE, NEXT, daily board) to the other agent. Further work in this repo stays on consult intake, market metrics, and MLS analyze helpers.
+Leave Stage 1 (inquiry, SEND, NOTE, NEXT, daily board) to the other agent. The revenue desk is ready for a real packet. No live lead is loaded. The next money step is to paste the hottest open Redfin thread, Capture order, or property into `/revenue/desk` and send the draft yourself.
