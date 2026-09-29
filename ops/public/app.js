@@ -164,17 +164,34 @@ function morningView() {
     return wrap;
   }
   wrap.append(el('pre', { class: 'brief-text', id: 'morning-brief', text: data.text }));
+  if (data.sections) wrap.append(sectionList('Brief header', data.sections.header, 'brief-header', data.clock));
   for (const card of data.cards || []) {
-    const box = el('article', { class: 'exec-card' });
+    const box = el('article', { class: 'exec-card', id: card.anchor || '' });
     box.append(
       el('h3', { text: `${card.priority}. ${card.clientName}` }),
       el('p', { text: card.whyNow }),
-      el('p', { class: 'action', text: card.humanAction }),
+      el('p', { class: 'action', text: card.primaryAction || card.humanAction }),
     );
+    for (const extra of card.secondaryActions || []) box.append(el('p', { text: extra }));
+    if (card.searchPlan && card.searchPlan.mode !== 'none') {
+      box.append(el('p', { text: `SEARCH ${card.searchPlan.mode.toUpperCase()}. REQUIRED: ${card.searchPlan.required}. PREFERRED: ${card.searchPlan.preferred}. DO NOT FILTER OUT YET: ${card.searchPlan.doNotFilter}` }));
+    }
+    if (card.offerReadiness) box.append(el('p', { text: `OFFER READINESS: ${card.offerReadiness.readiness}. NEXT ACTION: ${card.offerReadiness.nextAction}` }));
+    if (card.transactionLine) box.append(el('p', { text: card.transactionLine }));
+    for (const item of (card.milestones || []).filter((row) => row.status !== 'Not on file')) {
+      box.append(el('p', { text: `${item.name}: STATUS ${item.status} / OWNER ${item.owner} / DEADLINE ${item.deadline} / SOURCE ${item.source} / NEXT ACTION ${item.nextAction}` }));
+    }
     if (card.clientDraft) box.append(copyButton('COPY CLIENT TEXT', card.clientDraft));
     if (card.callOpening) box.append(copyButton('COPY CALL OPENING', card.callOpening));
     if (card.emailDraft) box.append(copyButton('COPY EMAIL', card.emailDraft));
     if (card.agentToolsNote) box.append(copyButton('COPY AGENT TOOLS NOTE', card.agentToolsNote));
+    if (card.agentToolsUpdate) {
+      box.append(el('p', { class: 'action', text: 'UPDATE AGENT TOOLS' }));
+      box.append(el('p', { text: `OPEN: ${card.agentToolsUpdate.open}` }));
+      box.append(copyButton('PASTE', card.agentToolsUpdate.paste));
+      box.append(el('p', { text: `THEN SET: ${card.agentToolsUpdate.thenSet}` }));
+    }
+    if (card.guardrail) box.append(el('p', { class: 'rule', text: card.guardrail }));
     for (const link of card.links || []) {
       box.append(openButton(link));
     }
@@ -197,7 +214,59 @@ function morningView() {
     }
     wrap.append(box);
   }
+  if (data.sections) wrap.append(sectionList('Summary', data.sections.summary, 'brief-summary'));
+  if (data.capabilities) wrap.append(capabilityTable(data.capabilities));
+  if (data.friday) wrap.append(fridayBlock(data.friday));
   return wrap;
+}
+
+function sectionList(title, buckets, id, clock) {
+  const box = el('section', { class: 'stack', id });
+  box.append(el('h2', { text: title }));
+  if (clock) {
+    box.append(el('p', { text: `Date: ${clock.date}` }));
+    box.append(el('p', { text: `Current ET: ${clock.easternTime}` }));
+  }
+  for (const bucket of buckets || []) {
+    const row = el('p');
+    row.append(el('strong', { text: `${bucket.label}: ${bucket.count} ` }));
+    for (const link of bucket.links || []) {
+      row.append(el('a', { href: `#${link.anchor}`, text: link.name }));
+      row.append(document.createTextNode(' '));
+    }
+    box.append(row);
+  }
+  return box;
+}
+
+function capabilityTable(rows) {
+  const box = el('section', { id: 'integration-capabilities' });
+  box.append(el('h2', { text: 'Integration capabilities' }));
+  box.append(el('p', { class: 'rule', text: 'HUMAN ACTION MODE. No send, write, or provider confirmation is available.' }));
+  const table = el('table', { class: 'capability-table' });
+  const head = el('tr');
+  for (const label of ['Integration', 'Read', 'Search', 'Draft', 'Create', 'Update', 'Send', 'Call', 'Schedule', 'Confirm delivery', 'Confirm completion', 'Mode']) {
+    head.append(el('th', { text: label }));
+  }
+  table.append(head);
+  for (const row of rows) {
+    const line = el('tr');
+    for (const value of [row.integration, row.read, row.search, row.draft, row.create, row.update, row.send, row.call, row.schedule, row.confirmDelivery, row.confirmCompletion, row.mode]) {
+      line.append(el('td', { text: value }));
+    }
+    table.append(line);
+  }
+  box.append(table);
+  return box;
+}
+
+function fridayBlock(report) {
+  const box = el('section', { id: 'friday-report', class: 'stack' });
+  box.append(el('h2', { text: report.title }));
+  for (const line of report.lines || []) box.append(el('p', { text: line }));
+  box.append(el('p', { class: 'rule', text: 'Incomplete denominators' }));
+  for (const line of report.incompleteDenominators || []) box.append(el('p', { text: line }));
+  return box;
 }
 
 function copyButton(label, value) {

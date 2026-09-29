@@ -184,6 +184,15 @@ CREATE TABLE IF NOT EXISTS lead_source_history (
   conflict INTEGER NOT NULL DEFAULT 0,
   recorded_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS showing_transitions (
+  id TEXT PRIMARY KEY,
+  opportunity_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  source TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 const OPPORTUNITY_COLUMNS: Array<[string, string]> = [

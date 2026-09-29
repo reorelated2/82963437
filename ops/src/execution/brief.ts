@@ -1,7 +1,10 @@
 import { enqueueApproval } from '../conversion/approval.ts';
 import { nextBestAction } from '../conversion/engine.ts';
 import { text, type SqlDb } from '../sql.ts';
-import { planDesk, renderMorningBrief, type DeskFact, type ExecutionCard } from './plan.ts';
+import { integrationCapabilities, type IntegrationCapability } from './capabilities.ts';
+import { fridayReport, type FridayReport } from './friday.ts';
+import { planDesk, renderMorningBrief, morningSections, easternClock, type BriefBucket, type DeskFact, type ExecutionCard } from './plan.ts';
+import { recordShowingTransition } from './showing.ts';
 
 export interface MorningBrief {
   generated: true;
@@ -15,6 +18,10 @@ export interface MorningBrief {
     postTour: number;
     contactGaps: number;
   };
+  sections: { header: BriefBucket[]; summary: BriefBucket[] };
+  capabilities: IntegrationCapability[];
+  friday: FridayReport;
+  clock: { date: string; easternTime: string };
 }
 
 export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
@@ -63,6 +70,15 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
       now,
     });
     card.opportunityId = opportunityId;
+    for (const state of card.showingTransitions) {
+      recordShowingTransition(db, {
+        opportunityId,
+        state,
+        source: 'execution_desk',
+        evidence: card.whyNow,
+        now,
+      });
+    }
     cards.push(card);
     nextBestAction(db, opportunityId, now);
     const draft = card.clientDraft ?? card.emailDraft ?? card.callOpening;
@@ -97,6 +113,10 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
       postTour: ordered.filter((card) => card.showingState === 'OUTCOME_UNKNOWN').length,
       contactGaps: ordered.filter((card) => card.internalCode === 'needs_contact').length,
     },
+    sections: morningSections(ordered),
+    capabilities: integrationCapabilities(),
+    friday: fridayReport(db, now),
+    clock: easternClock(now),
   };
 }
 

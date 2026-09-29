@@ -1,5 +1,7 @@
 import { scheduledTourIsStale, scheduledTourLanguage } from '../conversion/engine.ts';
 import { screenKyleVoice } from '../conversion/policy.ts';
+import { offerSurface, transactionLine, transactionMilestones, type OfferSurface, type TransactionMilestone } from './modes.ts';
+import { SHOWING_STATES, type ShowingState } from './showing.ts';
 
 export interface DeskFact {
   field: string;
@@ -52,6 +54,16 @@ export interface ExecutionCard {
   live: false;
   internalCode: string;
   hotScore: number;
+  primaryAction: string;
+  secondaryActions: string[];
+  guardrail: string;
+  anchor: string;
+  searchPlan: { mode: 'create' | 'conflict' | 'none'; required: string; preferred: string; doNotFilter: string };
+  offerReadiness: OfferSurface;
+  transactionLine: string;
+  showingTransitions: string[];
+  agentToolsUpdate: { open: string; paste: string; thenSet: string };
+  milestones: TransactionMilestone[];
 }
 
 const URL_OK = /^https:\/\/[^\s]+$/i;
@@ -92,8 +104,8 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     hotScore: Number.isFinite(hotScore) ? hotScore : 0,
   };
 
-  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
-    const full: ExecutionCard = { ...card, manualActionRequired: true, approvalRequired: true, live: false };
+  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
+    const full = { ...card, manualActionRequired: true as const, approvalRequired: true as const, live: false as const } as ExecutionCard;
     for (const draft of [full.clientDraft, full.callOpening, full.emailDraft]) {
       if (!draft) continue;
       const voice = screenKyleVoice(draft);
@@ -104,8 +116,8 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       if (full.clientDraft && /already happened|glad you|hope you enjoyed/i.test(full.clientDraft)) {
         full.clientDraft = `${first(input.name)}, did you end up seeing ${property ?? 'the place'}?`;
       }
-      if (!/Do not send that draft/.test(full.agentToolsNote)) {
-        full.agentToolsNote = `${full.agentToolsNote} An unsent draft claims the tour already happened. Do not send that draft. It is not prior contact and it is not a completed tour.`;
+      if (!/unsent draft/i.test(full.agentToolsNote)) {
+        full.agentToolsNote = `${full.agentToolsNote} An unsent draft claims the tour already happened. That draft was not sent.`;
       }
     }
     const cashInference = input.facts.find((fact) => fact.field === 'cash_vs_finance' && fact.verification !== 'verified' && /cash/i.test(fact.value));
@@ -134,6 +146,32 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
         full.emailSubject = full.emailSubject ?? (/saving /i.test(full.emailDraft) ? 'Your saved search' : 'The property you asked about');
       }
     }
+    full.agentToolsNote = full.agentToolsNote.replace(/\s*Nothing was written to Agent Tools\./g, '').trim();
+    full.guardrail = 'GUARDRAIL: Nothing was written to Agent Tools. A draft is not a send. Do not mark the showing completed or the offer submitted from this screen.';
+    full.anchor = `card-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+    full.searchPlan = searchPlanFor(input);
+    if (full.searchPlan.mode === 'conflict' && !/SEARCH CONFLICT/.test(full.humanAction)) {
+      full.humanAction = `${full.humanAction} SEARCH CONFLICT. REQUIRED: not set. PREFERRED: not set. DO NOT FILTER OUT YET: ${full.searchPlan.doNotFilter}`;
+    }
+    full.offerReadiness = offerSurface(input.facts);
+    full.transactionLine = transactionLine(input.facts);
+    full.milestones = transactionMilestones(input.facts);
+    full.showingTransitions = justifiedShowings(input, full.showingState);
+    const splitAt = full.internalCode === 'cma_needed' ? full.humanAction.indexOf('CMA NEEDED') : 0;
+    if (splitAt > 0) {
+      full.primaryAction = full.humanAction.slice(splitAt);
+      full.secondaryActions = [full.humanAction.slice(0, splitAt).trim()];
+    } else {
+      const parts = full.humanAction.split(/(?<=\.)\s+/).filter(Boolean);
+      full.primaryAction = parts[0] ?? full.humanAction;
+      full.secondaryActions = parts.slice(1);
+    }
+    const tools = verified('agent_tools_url');
+    full.agentToolsUpdate = {
+      open: tools && /^https:\/\//i.test(tools) ? tools : 'LINK NOT FOUND. Open Agent Tools and find this client by name.',
+      paste: full.agentToolsNote,
+      thenSet: 'Set a reminder and the next action only. Do not change stage, tour completion, or offer status without evidence.',
+    };
     return full;
   };
 
@@ -208,7 +246,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       askQualificationNow: false,
       showingState: 'OUTCOME_UNKNOWN',
       customerPropertyState: 'Scheduled',
-      agentToolsNote: note(`Do not mark the showing completed until the customer confirms it. Prepared text asks whether they saw ${property ?? 'the property'}.`),
+      agentToolsNote: note(`Text prepared asking whether they saw ${property ?? 'the property'}. The tour outcome is not confirmed.`),
       followUp: 'Customer reply about attendance.',
       internalCode: 'tour_follow_up',
     });
@@ -652,7 +690,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     return finish({
       ...base,
       priority: 60,
-      whyNow: 'No verified cell or email.',
+      whyNow: heldWhy(input),
       humanAction: `GET ${input.name.toUpperCase()}'S CELL. WHERE TO LOOK: Agent Tools, Redfin, or another authorized source.`,
       clientDraft: property
         ? `${first(input.name)}, Kyle with Redfin. I'm checking on ${property}. Is that still the one?`
@@ -668,13 +706,13 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       askQualificationNow: false,
       showingState: showing.state,
       customerPropertyState: showing.customerState,
-      agentToolsNote: note([
-        'No verified cell. No number was invented.',
-        offerMention ? 'Agent Tools mentions an offer request. It is not a confirmed submission.' : '',
-        any('saved_search') ? `Saved search stays on file: ${any('saved_search')}.` : '',
-        /text/i.test(any('agent_tools_tags') ?? '') ? 'Agent Tools tag says prefers text. That tag is not a sent message.' : '',
-        'The draft cannot be sent until a cell is on file.',
-      ].filter(Boolean).join(' ')),
+      agentToolsNote: [
+        any('recent_note') ?? '',
+        offerMention && !/offer request/i.test(any('recent_note') ?? '') ? 'Offer request is on file. It is not a confirmed submission.' : '',
+        any('saved_search') ? `Saved searches on file: ${any('saved_search')}.` : '',
+        /text/i.test(any('agent_tools_tags') ?? '') ? 'Prefers text.' : '',
+        'No verified cell on file.',
+      ].filter(Boolean).join(' '),
       followUp: 'When a verified cell is added.',
       blockedReason: 'Verified contact is missing.',
       internalCode: 'needs_contact',
@@ -1123,7 +1161,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       ...base,
       priority: 64,
       whyNow: 'Enough criteria exist to build a search without overfiltering.',
-      humanAction: `CREATE SEARCH NOW. REQUIRED: ${verified('search_hard')}. DO NOT FILTER OUT YET: ${verified('search_soft')}.`,
+      humanAction: `CREATE SEARCH NOW. REQUIRED: ${verified('search_hard')}. PREFERRED: ${verified('search_soft')}. DO NOT FILTER OUT YET: ${verified('search_soft')}.`,
       clientDraft: null,
       callOpening: null,
       emailDraft: null,
@@ -1262,6 +1300,32 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     });
   }
 
+  if (verified('owns_home') === 'yes' && verified('sale_dependency') !== 'homeowner_no_sale') {
+    return finish({
+      ...base,
+      priority: 48,
+      whyNow: 'They own a home. That is a potential listing opportunity, not a signed listing.',
+      humanAction: 'LISTING OPPORTUNITY. Confirm whether they want a conversation about selling the home they own. Do not open a listing file until they say yes.',
+      clientDraft: property
+        ? `${first(input.name)}, Kyle with Redfin. I'm checking on ${property} now. Do you also want to talk about the home you own?`
+        : `${first(input.name)}, Kyle with Redfin. You own a home. Do you want to talk about selling it, or is the purchase the only thing for now?`,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'Whether they want a listing conversation.',
+      ifYesNext: 'Ask which home, then where to pull the address.',
+      ifNoNext: 'Stay on the purchase. Do not open a listing file.',
+      ifUnclearNext: 'Ask once. Do not assume a listing.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: showing.state,
+      customerPropertyState: showing.customerState,
+      agentToolsNote: 'Buyer owns a home. Listing conversation has not started. No listing file was opened.',
+      followUp: 'Their yes or no on a listing conversation.',
+      internalCode: 'listing_opportunity',
+    });
+  }
+
   if (verified('owns_home') === 'yes' && verified('sale_dependency') === 'homeowner_no_sale') {
     return finish({
       ...base,
@@ -1294,7 +1358,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       ...base,
       priority: 70,
       whyNow: 'A saved search is on file. One question, tied to that search.',
-      humanAction: `TEXT ${input.name.toUpperCase()} NOW.`,
+      humanAction: `CREATE SEARCH NOW. REQUIRED: ${search}. PREFERRED: none stated. DO NOT FILTER OUT YET: price, beds, and baths not written in the search.`,
       clientDraft: `${first(input.name)}, Kyle with Redfin. You're still saving ${search}. What's prompting the move?`,
       callOpening: null,
       emailDraft: null,
@@ -1339,6 +1403,63 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
   });
 }
 
+function heldWhy(input: DeskEvidence): string {
+  const any = (field: string) => input.facts.find((fact) => fact.field === field)?.value ?? '';
+  const parts: string[] = [];
+  const note = any('recent_note');
+  if (/offer/i.test(`${note} ${any('buying_activity')}`)) {
+    parts.push(note || any('buying_activity'));
+    parts.push('This is an offer request, not offer ready.');
+  }
+  const searches = (any('saved_search')).split(/\s+and\s+/i).map((part) => part.trim()).filter(Boolean);
+  if (searches.length > 1) {
+    parts.push(`Two saved searches are on file: ${searches.join(' | ')}.`);
+    if (/text/i.test(any('agent_tools_tags'))) parts.push('Prefers text.');
+    parts.push('Do not turn them into filters until the buyer picks one.');
+  }
+  if (/sell first/i.test(any('agent_tools_tags'))) parts.push('Needs to sell first.');
+  const cma = overdueCma(input);
+  if (cma) parts.push(`CMA reminder is overdue: ${cma}.`);
+  parts.push('No verified cell.');
+  return parts.join(' ');
+}
+
+function searchPlanFor(input: DeskEvidence): ExecutionCard['searchPlan'] {
+  const verifiedValue = (field: string) => input.facts.find((fact) => fact.field === field && fact.kind === 'fact' && fact.verification === 'verified')?.value ?? '';
+  const hard = verifiedValue('search_hard');
+  const soft = verifiedValue('search_soft');
+  if (hard) {
+    return { mode: 'create', required: hard, preferred: soft || 'None stated', doNotFilter: soft || 'Nothing else stated' };
+  }
+  const raw = verifiedValue('saved_search');
+  if (!raw) return { mode: 'none', required: 'none on file', preferred: 'none on file', doNotFilter: 'Do not invent filters.' };
+  const parts = raw.split(/\s+and\s+/i).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    return { mode: 'conflict', required: 'Not set. The searches conflict.', preferred: 'Not set', doNotFilter: parts.join(' | ') };
+  }
+  return { mode: 'create', required: raw, preferred: 'None stated', doNotFilter: 'Price, beds, and baths that are not in the saved search.' };
+}
+
+function justifiedShowings(input: DeskEvidence, current: string): string[] {
+  const verified = (field: string) => input.facts.find((fact) => fact.field === field && fact.kind === 'fact' && fact.verification === 'verified')?.value ?? '';
+  const states: string[] = [];
+  const add = (state: ShowingState) => {
+    if (!states.includes(state)) states.push(state);
+  };
+  if (verified('showing_requested') || /tour request/i.test(verified('buying_activity'))) add('CUSTOMER_REQUESTED');
+  if (input.facts.some((fact) => fact.verification === 'verified' && scheduledTourLanguage(fact.field, fact.value))) add('SHOWING_REQUEST_CREATED');
+  if (verified('listing_side_contacted')) add('LISTING_SIDE_CONTACTED');
+  if (current === 'ACCESS_PENDING') add('ACCESS_PENDING');
+  if (verified('access_confirmed')) add('ACCESS_CONFIRMED');
+  if (verified('buyer_notified')) add('BUYER_NOTIFIED');
+  if (verified('buyer_acknowledged')) add('BUYER_ACKNOWLEDGED');
+  if (current === 'SHOWING_COMPLETED') add('SHOWING_COMPLETED');
+  if (/cancel/i.test(verified('buying_activity'))) add('SHOWING_CANCELLED');
+  if (verified('reschedule')) add('RESCHEDULE_NEEDED');
+  if (current === 'OUTCOME_UNKNOWN') add('OUTCOME_UNKNOWN');
+  return states.filter((state) => (SHOWING_STATES as readonly string[]).includes(state));
+}
+
 function overdueCma(input: DeskEvidence): string | null {
   for (const fact of input.facts) {
     if (fact.kind !== 'fact' || fact.verification !== 'verified') continue;
@@ -1377,22 +1498,93 @@ function first(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
+export interface BriefBucket {
+  label: string;
+  count: number;
+  links: Array<{ name: string; anchor: string }>;
+}
+
+function bucket(label: string, cards: ExecutionCard[], include: (card: ExecutionCard) => boolean): BriefBucket {
+  const hits = cards.filter(include);
+  return { label, count: hits.length, links: hits.map((card) => ({ name: card.clientName, anchor: card.anchor })) };
+}
+
+export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]; summary: BriefBucket[] } {
+  const missing = (card: ExecutionCard) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction);
+  const postTour = (card: ExecutionCard) => card.showingState === 'OUTCOME_UNKNOWN';
+  const offers = (card: ExecutionCard) => card.internalCode.startsWith('offer_')
+    || /Offer request only|not offer ready/i.test(card.offerReadiness.nextAction)
+    || (/offer request/i.test(`${card.whyNow} ${card.agentToolsNote}`) && !/No offer request is on file/i.test(card.offerReadiness.nextAction));
+  const header: BriefBucket[] = [
+    bucket('Actionable clients', cards, (card) => card.internalCode !== 'do_not_contact'),
+    bucket('Showings today', cards, (card) => card.showingState === 'ACCESS_PENDING'),
+    bucket('Showings requiring confirmation', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
+    bucket('Hot post-tour clients', cards, postTour),
+    bucket('Offers or offer requests', cards, offers),
+    bucket('Financing blockers', cards, (card) => card.internalCode === 'needs_preapproval'),
+    bucket('Buy after sell clients', cards, (card) => card.internalCode === 'sale_dependency' || card.internalCode === 'cma_needed'),
+    bucket('Listing opportunities', cards, (card) => card.internalCode === 'listing_opportunity'),
+    bucket('Listing agents needing contact', cards, (card) => card.internalCode === 'listing_agent_missing'),
+    bucket('Agent Tools records needing updates', cards, (card) => card.internalCode !== 'do_not_contact'),
+    bucket('Missing contact info', cards, missing),
+    bucket('Overdue actions', cards, (card) => card.internalCode === 'cma_needed' || /overdue/i.test(`${card.whyNow} ${card.humanAction}`)),
+    bucket('Waiting on client', cards, postTour),
+    bucket('Waiting on listing side', cards, (card) => card.internalCode === 'listing_agent_missing'),
+  ];
+  const summary: BriefBucket[] = [
+    bucket('CALLS TO MAKE', cards, (card) => Boolean(card.callOpening)),
+    bucket('TEXTS TO SEND', cards, (card) => Boolean(card.clientDraft)),
+    bucket('EMAILS TO SEND', cards, (card) => Boolean(card.emailDraft)),
+    bucket('LISTING AGENTS TO CONTACT', cards, (card) => card.internalCode === 'listing_agent_missing'),
+    bucket('SHOWINGS TO CONFIRM', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
+    bucket('SHOWINGS TODAY', cards, (card) => card.showingState === 'ACCESS_PENDING'),
+    bucket('POST TOUR FOLLOW UPS', cards, postTour),
+    bucket('FINANCING ITEMS', cards, (card) => card.internalCode === 'needs_preapproval'),
+    bucket('BUY AFTER SELL ITEMS', cards, (card) => card.internalCode === 'sale_dependency' || card.internalCode === 'cma_needed'),
+    bucket('CMAS NEEDED', cards, (card) => card.internalCode === 'cma_needed'),
+    bucket('OFFERS AND OFFER REQUESTS', cards, offers),
+    bucket('UNDER CONTRACT ITEMS', cards, (card) => card.internalCode === 'effective_date' || /under contract/i.test(card.customerPropertyState)),
+    bucket('CONTACT INFORMATION TO FIND', cards, missing),
+    bucket('AGENT TOOLS UPDATES', cards, (card) => card.internalCode !== 'do_not_contact'),
+    bucket('WAITING ON CLIENT', cards, postTour),
+    bucket('WAITING ON LISTING SIDE', cards, (card) => card.internalCode === 'listing_agent_missing'),
+    bucket('OVERDUE ACTIONS', cards, (card) => card.internalCode === 'cma_needed' || /overdue/i.test(`${card.whyNow} ${card.humanAction}`)),
+  ];
+  return { header, summary };
+}
+
+function bucketLine(item: BriefBucket): string {
+  if (item.links.length === 0) return `${item.label}: 0`;
+  return `${item.label}: ${item.count} ${item.links.map((link) => `${link.name} (#${link.anchor})`).join(', ')}`;
+}
+
+export function easternClock(now: Date): { date: string; easternTime: string } {
+  return {
+    date: new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(now),
+    easternTime: new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(now),
+  };
+}
+
 export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
-  const when = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(now);
+  const clock = easternClock(now);
   const ordered = [...cards];
+  const sections = morningSections(ordered);
   const lines = [
-    `MORNING EXECUTION BRIEF`,
-    when,
-    `Actionable clients: ${ordered.filter((card) => card.internalCode !== 'do_not_contact').length}`,
-    `Showings needing outcome: ${ordered.filter((card) => card.showingState === 'OUTCOME_UNKNOWN').length}`,
-    `Missing contact: ${ordered.filter((card) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction)).length}`,
+    'KYLEOS MORNING BRIEF',
+    `Date: ${clock.date}`,
+    `Current ET: ${clock.easternTime}`,
+    ...sections.header.map(bucketLine),
     '',
     'DO THESE FIRST',
   ];
@@ -1405,7 +1597,15 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
       `PROPERTY: ${card.propertyAddress ?? 'DATA NEEDED'}`,
       `PROPERTY STATUS: ${card.propertyStatus}`,
       `SHOWING: ${card.showingState}`,
-      `DO THIS: ${card.humanAction}`,
+      `DO THIS: ${card.primaryAction}`,
+      card.secondaryActions.length ? `THEN: ${card.secondaryActions.join(' ')}` : 'THEN: none',
+      card.searchPlan.mode === 'none' ? 'SEARCH: none on file' : `SEARCH: ${card.searchPlan.mode.toUpperCase()}. REQUIRED: ${card.searchPlan.required}. PREFERRED: ${card.searchPlan.preferred}. DO NOT FILTER OUT YET: ${card.searchPlan.doNotFilter}`,
+      `OFFER READINESS: ${card.offerReadiness.readiness}`,
+      `OFFER NEXT ACTION: ${card.offerReadiness.nextAction}`,
+      card.transactionLine,
+      ...card.milestones
+        .filter((item) => item.status !== 'Not on file')
+        .map((item) => `${item.name}: STATUS ${item.status} / OWNER ${item.owner} / DEADLINE ${item.deadline} / SOURCE ${item.source} / NEXT ACTION ${item.nextAction}`),
       card.clientDraft ? `COPY: ${card.clientDraft}` : 'COPY: none',
       card.callOpening ? `CALL OPENING: ${card.callOpening}` : 'CALL OPENING: none',
       card.emailDraft ? `EMAIL SUBJECT: ${card.emailSubject ?? ''}\nEMAIL: ${card.emailDraft}` : 'EMAIL: none',
@@ -1414,27 +1614,14 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
       `IF NO: ${card.ifNoNext}`,
       `IF UNCLEAR: ${card.ifUnclearNext}`,
       `AGENT TOOLS NOTE: ${card.agentToolsNote}`,
+      card.guardrail,
+      `UPDATE AGENT TOOLS: OPEN ${card.agentToolsUpdate.open} / PASTE / THEN SET: ${card.agentToolsUpdate.thenSet}`,
       `LINKS: ${card.links.map((item) => `${item.label} ${item.status === 'verified' ? item.url : 'LINK NOT FOUND'}`).join(' | ')}`,
       `SOURCE: ${card.leadSource}${card.sourceConflict ? ' / SOURCE ATTRIBUTION CONFLICT' : ''}`,
       `FOLLOW UP: ${card.followUp}`,
       card.askQualificationNow ? `NEXT QUESTION: ${card.qualificationQuestion}` : 'NEXT QUALIFICATION: do not ask yet',
     );
   });
-  lines.push(
-    '',
-    'SUMMARY',
-    `TEXTS TO SEND: ${ordered.filter((card) => card.clientDraft).length}`,
-    `CALLS TO MAKE: ${ordered.filter((card) => card.callOpening).length}`,
-    `EMAILS TO SEND: ${ordered.filter((card) => card.emailDraft).length}`,
-    `LISTING AGENTS TO CONTACT: ${ordered.filter((card) => card.internalCode === 'listing_agent_missing').length}`,
-    `SHOWINGS TO CONFIRM: ${ordered.filter((card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING').length}`,
-    `POST TOUR FOLLOW UPS: ${ordered.filter((card) => card.showingState === 'OUTCOME_UNKNOWN').length}`,
-    `FINANCING ITEMS: ${ordered.filter((card) => card.internalCode === 'needs_preapproval').length}`,
-    `BUY AFTER SELL ITEMS: ${ordered.filter((card) => card.internalCode === 'sale_dependency').length}`,
-    `CMAS NEEDED: ${ordered.filter((card) => card.internalCode === 'cma_needed').length}`,
-    `OFFERS AND OFFER REQUESTS: ${ordered.filter((card) => card.internalCode.startsWith('offer_') || /offer request/i.test(card.agentToolsNote)).length}`,
-    `CONTACT INFORMATION TO FIND: ${ordered.filter((card) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction)).length}`,
-    'Nothing was sent. Agent Tools was not written.',
-  );
+  lines.push('', 'SUMMARY', ...sections.summary.map(bucketLine), 'Nothing was sent. Agent Tools was not written.');
   return lines.join('\n');
 }

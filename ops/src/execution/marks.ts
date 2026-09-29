@@ -2,6 +2,7 @@ import { recordCanonicalEvent } from '../canonical.ts';
 import { recordActivity } from '../conversion/activity.ts';
 import { confirmOfferSubmitted } from '../conversion/engine.ts';
 import { text, type SqlDb } from '../sql.ts';
+import { recordShowingTransition } from './showing.ts';
 
 const MARKS = [
   'sent_manually',
@@ -41,6 +42,22 @@ export function applyManualMark(db: SqlDb, input: {
         kind: 'event_completed',
         actor: 'Kyle Kleinman',
         note: 'Kyle marked the showing completed. This is not a provider confirmation.',
+        now,
+      });
+      recordShowingTransition(db, {
+        opportunityId: input.opportunityId,
+        state: 'SHOWING_COMPLETED',
+        source: 'kyle_mark',
+        evidence: 'Kyle marked the showing completed inside KyleOS. Not a provider confirmation.',
+        now,
+      });
+    }
+    if (input.mark === 'showing_cancelled') {
+      recordShowingTransition(db, {
+        opportunityId: input.opportunityId,
+        state: 'SHOWING_CANCELLED',
+        source: 'kyle_mark',
+        evidence: 'Kyle marked the showing cancelled inside KyleOS.',
         now,
       });
     }

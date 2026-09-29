@@ -215,6 +215,10 @@ textarea { min-height: 220px; resize: vertical; }
 }
 .morning button.primary { background: var(--teal); color: white; }
 .morning button:disabled { opacity: 0.55; }
+#integration-capabilities { overflow-x: auto; }
+.capability-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 14px; }
+.capability-table th, .capability-table td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.morning a { color: var(--teal); font-weight: 700; }
 .brief-text {
   white-space: pre-wrap;
   font-family: var(--sans);

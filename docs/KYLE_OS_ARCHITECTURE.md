@@ -171,7 +171,9 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch after the execution desk: typecheck passed. `npm test` reported 111 passed, 0 failed. Backend typecheck passed and `npm test` reported 22 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+2026-09-29 result on this branch after the execution desk header, showing transitions, offer and transaction surfaces, capability table, and Friday report: typecheck passed. `npm test` reported 168 passed, 0 failed. Backend typecheck passed and `npm test` reported 22 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+
+`showing_transitions` stores each section 13 state as its own row. The desk records only states the evidence supports, plus an explicit manual mark for completed or cancelled. Offer readiness is READY or MISSING from verified offer facts. An offer request is MISSING. Transaction milestones carry STATUS, OWNER, DEADLINE, SOURCE, and NEXT ACTION. A deadline is the verified date string or HUMAN REVIEW REQUIRED. The Friday report counts open opportunities, pending approvals, and verified offer facts, and it names the incomplete denominators. The capability table does not claim READ, SEND, CALL, or SCHEDULE for any integration.
 
 ## 9. Audit after `main` was merged
 
