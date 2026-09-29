@@ -1,0 +1,82 @@
+{
+  "dataset": "redfin_agent_tools_leads",
+  "mode": "DRY_RUN",
+  "exported_at": "2026-09-29T15:00:00.000Z",
+  "source_system": "redfin_agent_tools",
+  "synthetic": true,
+  "records": [
+    {
+      "record_id": "fixture-lane-001",
+      "disposition": "lead",
+      "source": {
+        "system": "redfin_agent_tools",
+        "source_id": "at-fixture-lane",
+        "exported_at": "2026-09-29T15:00:00.000Z"
+      },
+      "person": {
+        "display_name": "Fixture Lane",
+        "phones": [{ "value": "(305) 555-0101", "verification": "verified" }],
+        "emails": [{ "value": "fixture.lane@example.com", "verification": "verified" }],
+        "household_id": "hh-fixture-lane"
+      },
+      "facts": [
+        { "field": "area", "value": "Hollywood", "kind": "fact", "verification": "verified", "evidence": "Agent Tools field" },
+        { "field": "budget", "value": "$650K", "kind": "fact", "verification": "verified", "evidence": "Agent Tools field" },
+        { "field": "financing_state", "value": "UNKNOWN", "kind": "fact", "verification": "verified", "evidence": "No financing stated" },
+        { "field": "search_state", "value": "NOT_STARTED", "kind": "fact", "verification": "verified", "evidence": "No search criteria stored" },
+        { "field": "timeline", "value": "this spring", "kind": "inference", "verification": "unverified", "evidence": "Not confirmed by the customer" }
+      ],
+      "dedup_candidates": []
+    },
+    {
+      "record_id": "fixture-empty-002",
+      "disposition": "lead",
+      "source": {
+        "system": "redfin_agent_tools",
+        "source_id": "at-fixture-empty",
+        "exported_at": "2026-09-29T15:00:00.000Z"
+      },
+      "person": {
+        "display_name": "Fixture Nocontact",
+        "phones": [],
+        "emails": [{ "value": "maybe.nocontact@example.com", "verification": "inferred" }]
+      },
+      "facts": [
+        { "field": "area", "value": "Aventura", "kind": "inference", "verification": "unverified", "evidence": "Name of a city in a note" }
+      ],
+      "dedup_candidates": []
+    },
+    {
+      "record_id": "fixture-review-003",
+      "disposition": "needs_review",
+      "source": {
+        "system": "redfin_agent_tools",
+        "source_id": "at-fixture-review",
+        "exported_at": "2026-09-29T15:00:00.000Z"
+      },
+      "person": {
+        "display_name": "Fixture Review"
+      },
+      "facts": [],
+      "dedup_candidates": [
+        { "source_id": "at-fixture-lane", "reason": "A note mentions Fixture Lane. Name and note are not a merge." }
+      ]
+    },
+    {
+      "record_id": "fixture-lane-twin-004",
+      "disposition": "lead",
+      "source": {
+        "system": "redfin_agent_tools",
+        "source_id": "at-fixture-lane-twin",
+        "exported_at": "2026-09-29T15:00:00.000Z"
+      },
+      "person": {
+        "display_name": "Fixture Lane",
+        "phones": [{ "value": "(305) 555-0102", "verification": "verified" }],
+        "emails": [{ "value": "fixture.lane.twin@example.com", "verification": "verified" }]
+      },
+      "facts": [],
+      "dedup_candidates": []
+    }
+  ]
+}

@@ -1,66 +1,72 @@
 # Architecture
 
-## Choice
+The 2026-09-29 map of the whole repository, including the Phase 1 client and event tables, is [KYLE_OS_ARCHITECTURE.md](KYLE_OS_ARCHITECTURE.md). Current status is [STATUS.md](STATUS.md). This file is the original Stage 1 desk note, plus the consult-app boundary brought in from `main`.
 
-One local Node process, a SQLite file, and a phone-friendly web page. Release 1 does not call a paid API.
+## KyleOS desk (`ops/`)
 
-This is the smallest setup that still has one record per contact, a review queue, drafts that cannot send themselves, a job log, and a backup you can restore. Supabase and OpenAI exist in older code and are not configured. Using them now would add accounts and cost without a Redfin connection.
+The first release is a local web desk plus a SQLite file. Node serves the page and the API. No hosted database, no paid AI API, and no Redfin login are required to use the workflow.
 
-Redfin remains the system of record for brokerage work. The desk stores working copies with source text, timestamps, and hashes. Notes are written so Kyle can paste them into Redfin. The desk does not update Redfin.
+This is the smallest setup that still has a real record, a review queue, a restart-safe file, and a backup. The older Expo app and Playwright collector remain in the repo, but they are not the operating system and they are not used for client messages.
 
-## What runs where
+## System of record
 
-- Browser page: `backend/public`. Open `http://127.0.0.1:8080`.
-- API: `/api/os/...` in the same process.
-- Database: `backend/data/os.sqlite` (created on first run, not committed).
-- Screenshots: `backend/data/uploads`.
-- Backups: `backend/data/backups`.
-- Older consultation app: `mobile/` and the `/markets`, `/strategy`, `/clients`, `/mls` routes. Left in place. The Redfin page collector does not start unless `RUN_REDFIN_COLLECTOR=true`.
+Redfin Partner Tools is the system of record for Redfin customers. This desk is a working copy. Every note says that. Export and backup exist so the copy can leave this computer. There is no silent two-way sync.
 
-The server listens on `127.0.0.1` unless `HOST` is set. Do not expose it on the public internet. There is no login in this release.
+## Records
 
-## Record model
+One contact is the canonical person. Linked rows hold facts, source events, conflicts, activities, notes, drafts, tasks, appointments, milestones, and jobs.
 
-One `contacts` row is the person. Linked rows:
+Stable ids are UUIDs. Source events store the raw text, a content hash, an optional idempotency key, and a timestamp. Phone and email identifiers are unique. The same name alone is not merged.
 
-- `contact_identifiers` for phone and email. An exact phone or email matches the existing person. The same name with a different phone is a possible duplicate and is not merged.
-- `sources` keeps the pasted text or screenshot path and a content hash. The same text or image a second time does not create another contact, note, draft, or follow up.
-- `facts` stores each field as stated, data needed, unclear, or conflict. Each fact also records whether the client said it, it is missing, or the reading was unclear.
-- `households` links people who share a household. Opting out one person does not change the other person's permission to be contacted.
-- `source_attributions` keeps every lead source. The first source stays the original. A later source is added and does not replace it.
-- `properties` and `showings` keep address, MLS, requested time, available time, and confirmed time apart.
-- `messages` are drafts. `sent_at` stays empty. There is no send route.
-- `notes` are the CRM notes.
-- `tasks` are follow ups and replies.
-- `review_items` are the queue.
-- `activity` is the history.
-- `jobs` are automations, with a retry cap of 3. Failures show on the daily screen.
-- `appointments` and `milestones` are on the daily screen. A milestone without an executed document is labeled as not a real deadline.
-- `settings` holds the outbound pause (default on) and the spending limit (default $0).
-- `authorizations` is empty. No automatic send is approved.
+Showing times use three roles: requested, available, and confirmed. A clock time is stored as an appointment only when the source gives a day word and am/pm. The role stays `requested` unless the source explicitly confirms it.
 
-## Lead path
+## Inquiry agent
 
-`POST /api/os/intake` or `POST /api/os/intake/screenshot` runs `extractLead`, then `commit` in one database transaction.
+A paste or screenshot runs the inquiry agent in `ops/src/agent.ts`. The run is stored in `agent_runs` and `agent_steps`. The tools, in order, are extract visible facts, match a contact, propose the package, read SEND / NOTE / NEXT, and refuse to send.
 
-Screenshot text comes from the optional pasted text, then from the local `tesseract` program if it is installed. If the reader is missing, or average word confidence is under 0.75, the contact is named "Unclear screenshot", facts stay unclear, and no client draft is created. A failed job is visible.
+Match uses a phone or an email. A name alone is a hold, not a merge. The agent does not have a send, Redfin write, MLS, or ShowingTime tool. `sent_messages` stays empty.
 
-Rules in the extractor:
+## Jobs and outbound
 
-- Financing is only pre-approved, pre-qualified, cash, or needs a lender.
-- "If I can get it confirmed" does not confirm a showing.
-- Lines that tell the software what to do are stored as source text. They do not send mail or confirm a showing.
-
-Drafts are assembled in `voice.ts` from extracted facts only.
+Outbound automations start paused. Draft mode is the default. `sent_messages` exists so tests can prove a send did not happen. Jobs retry at most 3 times and failed jobs stay visible until acknowledged. There is no authorized send workflow, so turning pause off still does not send.
 
 ## Safety
 
-- Outbound pause defaults to on.
-- Approving a draft sets status to `approved` and leaves `sent_at` empty.
-- Asking the desk to queue a send creates a failed job. Nothing is transmitted.
-- Spending above the limit is refused. Release 1 does not call a paid API, so spend stays $0 unless a test records it.
-- Source text is data. It cannot change these rules.
+Intake text is stored as data. It is not executed and it cannot change these rules. The server binds to `127.0.0.1` unless `OPS_HOST` is set. Do not expose it on the public internet without an access control that this version does not have.
 
-## Older code
+Screenshot reading uses local Tesseract. If Tesseract is missing, or confidence is under 45, no contact is created.
 
-`backend/src/lib/redfinCollector.ts` scrapes public Redfin market pages. It is not an MLS connection and it is off. `backend/src/lib/db.ts` still talks to Supabase for that older app. The desk uses `backend/src/os/db.ts` instead.
+## Where the KyleOS code lives
+
+| Path | Role |
+| --- | --- |
+| `ops/src/extract.ts` | Fact extraction |
+| `ops/src/voice.ts` | Summary, CRM note, and client draft |
+| `ops/src/workflow.ts` | Matching, queue, workspace, backup |
+| `ops/src/server.ts` | Local HTTP API and pages |
+| `ops/public/` | Mobile-friendly desk |
+| `ops/test/lead-workflow.test.ts` | Acceptance checks |
+
+## Consult app and the unmounted backend experiment
+
+`main` describes a different local desk that is not the KyleOS operating path. That experiment lives under `backend/src/os` and is not mounted by the Buyer Command Center server. Leave `ENABLE_LEAD_DESK` unset. Its database, if someone runs that code later, is `backend/data/os.sqlite`, not `ops/data/desk.sqlite`.
+
+What that experiment was designed to do:
+
+- Browser page: `backend/public`. Open `http://127.0.0.1:8080` only for the consult app. The consult app's `/` response is the Buyer Command Center, not this desk.
+- API shape, when mounted: `/api/os/...` in the same process.
+- Screenshots: `backend/data/uploads`. Backups: `backend/data/backups`.
+- Older consultation app: `mobile/` and the `/markets`, `/strategy`, `/clients`, `/mls` routes. Left in place. The Redfin page collector does not start unless `RUN_REDFIN_COLLECTOR=true`.
+
+Record notes from that experiment, kept so the design is not lost:
+
+- `contact_identifiers` match an exact phone or email. The same name with a different phone is not merged.
+- `sources` keep pasted text or a screenshot path and a content hash.
+- `facts` store stated, data needed, unclear, or conflict.
+- `households` link people. Opting out one person does not change the other person's permission.
+- `source_attributions` keep every lead source. A later source does not replace the first.
+- `properties` and `showings` keep address, MLS, requested time, available time, and confirmed time apart.
+- `messages` are drafts. `sent_at` stays empty.
+- `jobs` retry at most 3 times. `settings` hold the outbound pause (default on) and the spending limit (default $0). `authorizations` stay empty.
+
+`backend/src/lib/redfinCollector.ts` scrapes public Redfin market pages. It is not an MLS connection and it is off unless explicitly enabled. `backend/src/lib/db.ts` still talks to Supabase for the older consult app. The KyleOS desk does not use that client.
