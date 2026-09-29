@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { text, transaction, type SqlDb } from '../sql.ts';
+import { enqueueApproval, cancelPendingApprovals } from './approval.ts';
+import { isOpportunityDoNotContact } from './guards.ts';
 import {
   CONSULT_TRIGGERS,
   DEPENDENCY_VALUES,
@@ -10,6 +12,7 @@ import {
   READINESS_FLAGS,
   TIMELINE_LEAD_DAYS,
   detectHandoff,
+  screenNextAction,
   screenOutreach,
   type ClassificationAxis,
   type Confirmation,
@@ -79,6 +82,9 @@ export function recordAnswer(db: SqlDb, input: {
   return transaction(db, () => {
     const now = input.now ?? new Date();
     const opp = requireOpportunity(db, input.opportunityId);
+    if (isOpportunityDoNotContact(db, opp.id)) {
+      return { applied: false, reason: 'DO_NOT_CONTACT blocks further intake outreach.', question: null, live: false as const };
+    }
     if (!isConfirmation(input.confirmation)) {
       return {
         applied: false,
@@ -157,6 +163,9 @@ export function introduceLender(db: SqlDb, input: {
 }): { financingState: FinancingState; live: false } {
   const now = input.now ?? new Date();
   const opp = requireOpportunity(db, input.opportunityId);
+  if (isOpportunityDoNotContact(db, opp.id)) {
+    return { financingState: (text(opp, 'financing_state') || 'UNKNOWN') as FinancingState, live: false };
+  }
   if (input.consent !== 'granted') {
     writePlan(db, opp.id, {
       primaryStage: 'QUALIFYING',
@@ -179,6 +188,18 @@ export function introduceLender(db: SqlDb, input: {
     now,
   });
   markReadiness(db, opp.id, 'financing', 'unknown', 'Lender introduced. Application is not on file.', now);
+  enqueueApproval(db, {
+    opportunityId: opp.id,
+    clientId: opp.clientId,
+    actionType: 'lender_introduction',
+    channel: 'sms',
+    draftContent: 'Ask whether they want the lender introduction to stay on file. Do not request borrower documents by text.',
+    reason: 'Lender introduction stays in the approval queue.',
+    riskLevel: 'standard',
+    source: 'lender_handoff',
+    createdBy: 'system',
+    now,
+  });
   writePlan(db, opp.id, {
     primaryStage: 'QUALIFYING',
     financingState: 'INTRODUCED',
@@ -336,6 +357,7 @@ export function setRenterTimeline(db: SqlDb, input: {
 
 export function draftConsult(db: SqlDb, opp: { id: string; clientId: string }, trigger: ConsultTrigger, now: Date): { id: string; live: false } {
   if (!CONSULT_TRIGGERS.includes(trigger)) throw new Error('Unknown consult trigger.');
+  if (isOpportunityDoNotContact(db, opp.id)) return { id: '', live: false };
   const existing = db.get(
     `SELECT id FROM consult_requests WHERE opportunity_id = ? AND trigger_name = ?`,
     opp.id,
@@ -357,6 +379,7 @@ export function draftConsult(db: SqlDb, opp: { id: string; clientId: string }, t
     body,
     now.toISOString(),
   );
+  db.run(`UPDATE consult_requests SET created_by = 'system', updated_at = ? WHERE id = ?`, now.toISOString(), id);
   return { id, live: false };
 }
 
@@ -445,10 +468,13 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     opportunityId,
   );
   const stage = text(opp, 'primary_stage') || 'NEW_INQUIRY';
+  const sellerStage = text(opp, 'seller_stage');
   const financing = text(opp, 'financing_state') || 'UNKNOWN';
   const evidence = [
     `stage ${stage}`,
+    sellerStage ? `seller_stage ${sellerStage}` : 'no seller stage',
     `financing ${financing}`,
+    text(opp, 'follow_up_trigger') ? `trigger ${text(opp, 'follow_up_trigger')}` : 'no trigger',
     text(opp, 'next_action') ? `plan ${text(opp, 'next_action')}` : 'no plan text',
   ];
   let bucket: PriorityBucket = 'THIS_WEEK';
@@ -487,13 +513,37 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     approval = true;
     confidence = 'high';
     reasons.push('Kyle was asked to take the conversation.');
-  } else if (text(opp, 'follow_up_trigger') === 'lender_application' && text(opp, 'next_action_due_at') && text(opp, 'next_action_due_at') <= now.toISOString()) {
+  } else if (stage === 'UNDER_CONTRACT' || sellerStage === 'SELLER_UNDER_CONTRACT' || sellerStage === 'SELLER_CLOSING') {
     bucket = 'ACT_NOW';
-    score = 85;
+    score = 98;
+    actionType = 'review_closing_risk';
+    reason = 'Review the closing or contract risk before any other outreach.';
+    reasons.push('Closing or contract risk outranks new outreach.');
+  } else if (stage === 'OFFER_READY' || sellerStage === 'SELLER_OFFER_REVIEW') {
+    bucket = 'ACT_NOW';
+    score = 94;
+    actionType = 'review_offer_with_kyle';
+    reason = 'Review the offer with Kyle. Discussion does not mean the offer was submitted.';
+    reasons.push('An active offer stays with Kyle.');
+  } else if (financing === 'DOCUMENTS_PENDING') {
+    bucket = 'TODAY';
+    score = 88;
+    actionType = 'financing_gap';
+    reason = 'Review the financing gap before scheduling the consultation.';
+    reasons.push('Financing is blocked on documents. Do not request those documents by SMS.');
+  } else if (stage === 'TOURING' || sellerStage === 'SELLER_CONSULT_SCHEDULED') {
+    bucket = 'TODAY';
+    score = 84;
+    actionType = 'confirm_appointment';
+    reason = text(opp, 'next_action') || 'Confirm the appointment. A request is not a confirmed showing.';
+    reasons.push('An appointment or tour is imminent.');
+  } else if (text(opp, 'follow_up_trigger') === 'lender_application' && text(opp, 'next_action_due_at') && text(opp, 'next_action_due_at') <= now.toISOString()) {
+    bucket = 'TODAY';
+    score = 78;
     actionType = 'lender_follow_up';
     reason = text(opp, 'next_action');
     reasons.push('Lender was introduced and the application lag has passed.');
-  } else if (stage === 'CONSULT_READY') {
+  } else if (stage === 'CONSULT_READY' || sellerStage === 'SELLER_CONSULT_READY') {
     bucket = 'TODAY';
     score = 80;
     actionType = 'draft_consult';
@@ -535,16 +585,8 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     priority_reasons: reasons.slice(0, 3),
     live: false,
   };
-  db.run(`UPDATE next_best_actions SET is_primary = 0 WHERE opportunity_id = ?`, opp.id);
-  db.run(
-    `INSERT INTO next_best_actions (
-      id, client_id, opportunity_id, action_type, reason, evidence_json, urgency, confidence,
-      execution_method, approval_required, deadline, expected_outcome, failure_action, follow_up_trigger,
-      priority_score, priority_bucket, priority_reasons_json, is_primary, live, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)`,
-    randomUUID(),
-    action.client_id,
-    action.opportunity_id,
+  const existingAction = db.get(`SELECT id FROM next_best_actions WHERE opportunity_id = ? AND is_primary = 1`, opp.id);
+  const params = [
     action.action_type,
     action.reason,
     JSON.stringify(action.evidence),
@@ -560,8 +602,71 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     action.priority_bucket,
     JSON.stringify(action.priority_reasons),
     now.toISOString(),
-  );
+  ];
+  if (existingAction) {
+    db.run(
+      `UPDATE next_best_actions SET
+        action_type = ?, reason = ?, evidence_json = ?, urgency = ?, confidence = ?, execution_method = ?,
+        approval_required = ?, deadline = ?, expected_outcome = ?, failure_action = ?, follow_up_trigger = ?,
+        priority_score = ?, priority_bucket = ?, priority_reasons_json = ?, updated_at = ?, source = 'conversion_engine',
+        created_by = 'system'
+       WHERE id = ?`,
+      ...params,
+      text(existingAction, 'id'),
+    );
+  } else {
+    db.run(
+      `INSERT INTO next_best_actions (
+        id, client_id, opportunity_id, action_type, reason, evidence_json, urgency, confidence,
+        execution_method, approval_required, deadline, expected_outcome, failure_action, follow_up_trigger,
+        priority_score, priority_bucket, priority_reasons_json, is_primary, live, created_at, updated_at, source, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, 'conversion_engine', 'system')`,
+      randomUUID(),
+      action.client_id,
+      action.opportunity_id,
+      ...params,
+      now.toISOString(),
+    );
+  }
   return action;
+}
+
+export function setDoNotContact(db: SqlDb, input: { opportunityId: string; now?: Date; source?: string }): { applied: true; live: false } {
+  const now = input.now ?? new Date();
+  requireOpportunity(db, input.opportunityId);
+  db.run(
+    `UPDATE opportunities SET
+      primary_stage = 'DO_NOT_CONTACT', no_action_reason = 'DO_NOT_CONTACT',
+      next_action = NULL, next_action_owner = NULL, next_action_due_at = NULL, follow_up_trigger = NULL,
+      updated_at = ?
+     WHERE id = ?`,
+    now.toISOString(),
+    input.opportunityId,
+  );
+  cancelPendingApprovals(db, input.opportunityId, now);
+  return { applied: true, live: false };
+}
+
+export function confirmOfferSubmitted(db: SqlDb, input: {
+  opportunityId: string;
+  confirmation: string;
+  now?: Date;
+}): { applied: boolean; stage: string; live: false } {
+  const now = input.now ?? new Date();
+  const opp = requireOpportunity(db, input.opportunityId);
+  const current = text(opp, 'primary_stage') || 'ENGAGED';
+  if (input.confirmation !== 'kyle_confirmed') {
+    return { applied: false, stage: current, live: false };
+  }
+  writePlan(db, opp.id, {
+    primaryStage: 'OFFER_SUBMITTED',
+    financingState: text(opp, 'financing_state') || 'UNKNOWN',
+    nextAction: 'Kyle confirmed the offer was submitted. Review the file with Kyle before any further offer, negotiation, or contract step.',
+    dueAt: hoursFrom(now, 4),
+    followUpTrigger: 'kyle_handoff',
+    now,
+  });
+  return { applied: true, stage: 'OFFER_SUBMITTED', live: false };
 }
 
 export function coverageGaps(db: SqlDb): string[] {
@@ -635,12 +740,10 @@ function applyAnswerEffects(db: SqlDb, opp: Opp, field: IntakeField, value: stri
   if (field === 'current_home' && /own/.test(lower) && !/rent/.test(lower)) {
     setClassification(db, { opportunityId: opp.id, axis: 'dependency', value: 'homeowner_no_sale', confirmation, source: 'intake', now });
   }
-  if (field === 'sale_dependency' && /proceeds/.test(lower)) {
-    setClassification(db, { opportunityId: opp.id, axis: 'dependency', value: 'proceeds_required', confirmation, source: 'intake', now });
-  } else if (field === 'sale_dependency' && /\b(sell|yes|need to sell|must sell)\b/.test(lower)) {
-    setClassification(db, { opportunityId: opp.id, axis: 'dependency', value: 'sale_required', confirmation, source: 'intake', now });
-  } else if (field === 'sale_dependency' && /\b(no|not)\b/.test(lower)) {
-    setClassification(db, { opportunityId: opp.id, axis: 'dependency', value: 'homeowner_no_sale', confirmation, source: 'intake', now });
+  for (const dependency of saleDependencyValues(lower)) {
+    if (field === 'sale_dependency') {
+      setClassification(db, { opportunityId: opp.id, axis: 'dependency', value: dependency, confirmation, source: 'intake', now });
+    }
   }
   if (/relocat/.test(lower)) requestConsult(db, { opportunityId: opp.id, trigger: 'relocation', now });
   if (/investor|investment/.test(lower)) requestConsult(db, { opportunityId: opp.id, trigger: 'investor', now });
@@ -657,21 +760,21 @@ function linkSellerOpportunity(db: SqlDb, buyerOpportunityId: string, reason: st
   db.run(
     `INSERT INTO opportunities (
       id, client_id, contact_id, business_line, stage, status, source_label, is_demo, created_at, updated_at,
-      next_action, next_action_owner, next_action_due_at, follow_up_trigger, no_action_reason, primary_stage, financing_state
-    ) VALUES (?, ?, ?, 'redfin_seller', 'new', 'open', 'linked_from_buyer', ?, ?, ?, ?, ?, ?, 'seller_intake', NULL, 'NEW_INQUIRY', NULL)`,
+      next_action, next_action_owner, next_action_due_at, follow_up_trigger, no_action_reason, primary_stage, financing_state, seller_stage
+    ) VALUES (?, ?, ?, 'redfin_seller', 'new', 'open', 'linked_from_buyer', ?, ?, ?, ?, ?, ?, 'seller_intake', NULL, 'NEW_INQUIRY', NULL, 'SELLER_NEW')`,
     sellerId,
     buyer.clientId,
     buyer.contactId,
     Number(db.get(`SELECT is_demo FROM opportunities WHERE id = ?`, buyer.id)?.is_demo ?? 0),
     nowIso,
     nowIso,
-    'Confirm which home has to sell before the purchase.',
+    'What is the property address? Do not guess it.',
     OWNER,
     due,
   );
   db.run(
-    `INSERT INTO opportunity_links (id, buyer_opportunity_id, seller_opportunity_id, reason, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO opportunity_links (id, buyer_opportunity_id, seller_opportunity_id, reason, created_at, created_by)
+     VALUES (?, ?, ?, ?, ?, 'system')`,
     randomUUID(),
     buyer.id,
     sellerId,
@@ -695,16 +798,28 @@ function linkSellerOpportunity(db: SqlDb, buyerOpportunityId: string, reason: st
 }
 
 function writeHandoff(db: SqlDb, opp: Opp, reason: string, level: number, summary: string, now: Date): { id: string } {
+  const existing = db.get(
+    `SELECT id FROM handoff_cards WHERE opportunity_id = ? AND reason = ? AND level = ?`,
+    opp.id,
+    reason,
+    level,
+  );
+  if (existing) {
+    db.run(`UPDATE handoff_cards SET updated_at = ? WHERE id = ?`, now.toISOString(), text(existing, 'id'));
+    return { id: text(existing, 'id') };
+  }
   const id = randomUUID();
   db.run(
-    `INSERT INTO handoff_cards (id, client_id, opportunity_id, reason, level, approval_required, summary, live, created_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?)`,
+    `INSERT INTO handoff_cards (
+      id, client_id, opportunity_id, reason, level, approval_required, summary, live, created_at, updated_at, source, created_by
+    ) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?, 'customer_message', 'system')`,
     id,
     opp.clientId,
     opp.id,
     reason,
     level,
     summary.slice(0, 500),
+    now.toISOString(),
     now.toISOString(),
   );
   writePlan(db, opp.id, {
@@ -719,6 +834,7 @@ function writeHandoff(db: SqlDb, opp: Opp, reason: string, level: number, summar
 }
 
 function selectQuestion(db: SqlDb, opportunityId: string): NextQuestion | null {
+  if (isOpportunityDoNotContact(db, opportunityId)) return null;
   const known = new Set(
     db.all(
       `SELECT field_key FROM intake_answers WHERE opportunity_id = ? AND status IN ('known', 'not_applicable')`,
@@ -793,7 +909,8 @@ function writePlan(db: SqlDb, opportunityId: string, input: {
   followUpTrigger: string;
   now: Date;
 }): void {
-  const screened = screenOutreach(input.nextAction, 'sms');
+  if (isOpportunityDoNotContact(db, opportunityId)) return;
+  const screened = screenNextAction(input.nextAction);
   if (!screened.allowed) throw new Error(screened.reason);
   db.run(
     `UPDATE opportunities SET
@@ -873,7 +990,20 @@ function consultReason(trigger: ConsultTrigger): string {
   if (trigger === 'home_to_sell') return 'a current home has to be sold before the purchase';
   if (trigger === 'relocation') return 'the move depends on a relocation date';
   if (trigger === 'investor') return 'the purchase is an investment and the criteria need a working session';
+  if (trigger === 'seller_consult') return 'the seller file has the address, motivation, timing, and decision makers';
   return 'the conversation is active enough to use a consult instead of more one-off texts';
+}
+
+function saleDependencyValues(lower: string): Array<'sale_required' | 'proceeds_required' | 'homeowner_no_sale'> {
+  const declinesProceeds = /do not need the proceeds|don't need the proceeds|proceeds (are )?not required|no sale proceeds|without the proceeds/.test(lower);
+  const needsProceeds = /(?<!do not )(?<!don't )(sale proceeds are required|proceeds are required|need the proceeds|needs the proceeds)/.test(lower);
+  const mustSell = /\b(must sell|need to sell|have to sell|sell first|yes)\b/.test(lower)
+    || (/\bsell\b/.test(lower) && !/\b(no|not)\b/.test(lower));
+  if (declinesProceeds && mustSell) return ['sale_required'];
+  if (needsProceeds && !declinesProceeds) return ['sale_required', 'proceeds_required'];
+  if (mustSell) return ['sale_required'];
+  if (/\b(no|not)\b/.test(lower)) return ['homeowner_no_sale'];
+  return [];
 }
 
 function isConfirmation(value: string): value is Confirmation {

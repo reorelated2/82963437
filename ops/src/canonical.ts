@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { openFactReview } from './conversion/reviews.ts';
 import { phoneKey } from './money.ts';
 import { text, transaction, type SqlDb } from './sql.ts';
 
@@ -486,9 +487,11 @@ export function writeClientFact(db: SqlDb, input: {
   const fieldKey = input.fact.fieldKey.trim();
   const value = input.fact.value.trim();
   const kind: FactKind = input.fact.kind === 'inference' ? 'inference' : 'fact';
-  const verification: FactVerification = kind === 'inference'
+  const automated = /^(system|automation|import|coordinator)$/i.test(input.fact.source.trim());
+  let verification: FactVerification = kind === 'inference'
     ? 'unverified'
     : input.fact.verification === 'verified' ? 'verified' : 'unverified';
+  if (automated && verification === 'verified') verification = 'unverified';
   if (!fieldKey || !value) {
     return { fieldKey, applied: false, reason: 'unchanged', keptValue: null };
   }
@@ -545,6 +548,18 @@ export function writeClientFact(db: SqlDb, input: {
   const existingValue = text(existing, 'value');
   const existingVerification = text(existing, 'verification');
   if (existingVerification === 'verified' && existingValue !== value) {
+    if (verification === 'verified' && kind === 'fact') {
+      openFactReview(db, {
+        clientId: input.clientId,
+        fieldKey,
+        keptValue: existingValue,
+        incomingValue: value,
+        keptSource: text(existing, 'source'),
+        incomingSource: input.fact.source,
+        now: input.now,
+        createdBy: actor,
+      });
+    }
     audit(db, actor, 'fact_conflict_kept', null, 'client_fact', text(existing, 'id'), {
       fieldKey,
       keptValue: existingValue,

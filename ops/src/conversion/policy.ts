@@ -119,6 +119,7 @@ export const CONSULT_TRIGGERS = [
   'relocation',
   'investor',
   'high_engagement',
+  'seller_consult',
 ] as const;
 
 export type ConsultTrigger = (typeof CONSULT_TRIGGERS)[number];
@@ -186,4 +187,80 @@ export function detectHandoff(text: string): { needed: boolean; reason: string; 
     return { needed: true, reason: 'The customer asked for Kyle.', level: 3 };
   }
   return { needed: false, reason: '', level: 0 };
+}
+
+export const SELLER_STAGES = [
+  'SELLER_NEW',
+  'SELLER_CONTACT_NEEDED',
+  'SELLER_DISCOVERY',
+  'SELLER_CMA_NEEDED',
+  'SELLER_CONSULT_READY',
+  'SELLER_CONSULT_SCHEDULED',
+  'SELLER_FOLLOW_UP',
+  'SELLER_AGREEMENT_PENDING',
+  'SELLER_PRELAUNCH',
+  'SELLER_ACTIVE',
+  'SELLER_OFFER_REVIEW',
+  'SELLER_UNDER_CONTRACT',
+  'SELLER_CLOSING',
+  'SELLER_CLOSED',
+  'SELLER_NURTURE',
+  'SELLER_LOST',
+] as const;
+
+export type SellerStage = (typeof SELLER_STAGES)[number];
+
+export const SELLER_READINESS = [
+  'SELLER_PROPERTY_IDENTIFIED',
+  'SELLER_MOTIVATION_KNOWN',
+  'SELLER_TIMELINE_KNOWN',
+  'SELLER_DECISION_MAKERS_KNOWN',
+  'SELLER_CMA_READY',
+  'SELLER_CONSULT_READY',
+  'SELLER_LISTING_READY',
+] as const;
+
+export type SellerReadiness = (typeof SELLER_READINESS)[number];
+
+export const SELLER_INTAKE_FIELDS = [
+  'property_address',
+  'ownership',
+  'motivation',
+  'timing',
+  'sale_required',
+  'mortgage_equity',
+  'condition',
+  'occupancy',
+  'decision_makers',
+  'representation',
+  'cma_need',
+  'consult_readiness',
+] as const;
+
+export type SellerIntakeField = (typeof SELLER_INTAKE_FIELDS)[number];
+
+export const SELLER_QUESTIONS: Record<SellerIntakeField, string> = {
+  property_address: 'What is the property address?',
+  ownership: 'Whose name is on the title?',
+  motivation: 'What is prompting a possible sale?',
+  timing: 'What timing are you considering, if any?',
+  sale_required: 'Is a sale of this home required before the purchase?',
+  mortgage_equity: 'Is there a mortgage to account for before a consult?',
+  condition: 'How would you describe the property condition?',
+  occupancy: 'Is the property owner-occupied, vacant, or tenant-occupied?',
+  decision_makers: 'Who else has to agree before a listing decision?',
+  representation: 'Is another agent or a listing agreement already in place?',
+  cma_need: 'Do you want a comparative market analysis before a consult?',
+  consult_readiness: 'Are the decision makers ready to schedule a listing consult?',
+};
+
+const GENERIC_OPENER = /^(follow up|check in|touch base)\b/i;
+
+export function screenNextAction(body: string): { allowed: boolean; reason: string } {
+  const screened = screenOutreach(body, 'sms');
+  if (!screened.allowed) return screened;
+  if (GENERIC_OPENER.test(body.trim())) {
+    return { allowed: false, reason: 'A next action has to name the step. Generic check-in copy is not used.' };
+  }
+  return screened;
 }

@@ -132,6 +132,18 @@ Banned draft phrases are `just checking in`, `touching base`, `circling back`, a
 
 Tests: `ops/test/conversion.test.ts` (BUYER 1, BUYER 2, BUYER 3, BUYER 7, BUYER 9, DATA 1).
 
+## 7d. What Phase 4 implemented
+
+Seller opportunities keep `business_line = redfin_seller` and gain `seller_stage` (`SELLER_NEW` through `SELLER_LOST`). Buyer `primary_stage` stays independent. The link remains `opportunity_links`. Seller intake asks one question. An unknown address is not invented. A CMA-ready flag does not move the seller stage. A seller consult draft is created only after address, motivation, timing, and decision makers are confirmed, and it stays `live = 0`.
+
+`approval_queue` holds outbound SMS, email, call, lender introduction, offer, commission, legal, seller consult, frustration, and Kyle-request drafts. Status moves through `PENDING`, `APPROVED`, `REJECTED`, `EXPIRED`, `EXECUTED`, and `CANCELLED`. `EXECUTED` is not set in this build. `canExecuteOutbound` is the only live gate and it never allows a send. Dry-run SMS, email, and voice providers return `dry_run` or `not_attempted`.
+
+`DO_NOT_CONTACT` blocks later outreach and overrides an approval. Offer discussion does not set `OFFER_SUBMITTED` unless Kyle confirms it. Requested showings, scheduled events, coordinator notes, and automated touches stay unverified. A second verified fact opens `fact_reviews` and keeps the original value. Reruns do not add a second seller link, lender handoff, pending approval, or primary next-best action.
+
+Notion is documented in `docs/NOTION_SYNC_CONTRACT.md` and is not called.
+
+Tests: `ops/test/phase4.test.ts`.
+
 ## 8. Integrations that need credentials
 
 None of these were called in this run. None should be treated as connected.
@@ -147,6 +159,7 @@ None of these were called in this run. None should be treated as connected.
 | Vapi calling | Shell only. No API key. `AI_CALLING` does not place a call. |
 | Supabase | URL and service role are unset. Not required for the desk. |
 | OpenAI | `OPENAI_API_KEY` is unset. The desk does not call it. |
+| Notion | Contract only in `docs/NOTION_SYNC_CONTRACT.md`. No token and no write. |
 
 ## Tests
 
@@ -156,4 +169,4 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch: typecheck passed. `npm test` reported 82 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests and handoff cards in the Phase 3 suite have `live = 0`. `sent_messages` stays empty.
+2026-09-29 result on this branch: typecheck passed. `npm test` reported 92 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.

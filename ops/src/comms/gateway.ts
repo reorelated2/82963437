@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { claimWorkflowLock, recordCanonicalEvent, releaseWorkflowLock } from '../canonical.ts';
+import { isOpportunityDoNotContact } from '../conversion/guards.ts';
+import { canExecuteOutbound, gateChannel } from '../outbound/gate.ts';
 import { text, transaction, type SqlDb } from '../sql.ts';
 import { consentStatusLabel, isChannelOptOut, loadConsent, outboundBlockReason, suppressChannel } from './consent.ts';
 import { assertDurableStatus } from './schema.ts';
@@ -78,6 +80,23 @@ function sendOutboundUnlocked(db: SqlDb, input: OutboundInput): CommResult {
   const consentStatus = consentStatusLabel(consent, input.channel);
   if (HUMAN_GATE.test(input.purpose.trim())) {
     return writeBlocked(db, input, now, 'suppressed', 'human_gate', consentStatus, false, 'Offers, contracts, and commission stay with Kyle. Nothing was sent.');
+  }
+  const doNotContact = isOpportunityDoNotContact(db, input.opportunityId);
+  if (input.channel !== 'calendar') {
+    const gate = canExecuteOutbound({
+      channel: gateChannel(input.channel),
+      approvalRequired: true,
+      approvalStatus: 'PENDING',
+      recipientVerified: Boolean(input.to),
+      doNotContact,
+      riskLevel: 'standard',
+    });
+    if (gate.allowed) {
+      return writeBlocked(db, input, now, 'not_attempted', 'blocked', consentStatus, false, 'Live execute is not available. Nothing was sent.');
+    }
+    if (doNotContact) {
+      return writeBlocked(db, input, now, 'suppressed', 'blocked', consentStatus, false, gate.reason);
+    }
   }
   const blocked = outboundBlockReason(consent, input.channel, input.purpose);
   if (blocked) {

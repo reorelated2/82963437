@@ -245,6 +245,11 @@ export function openDatabase(path: string): SqlDb {
   ensureSetting(db, 'sms_send', 'false');
   ensureSetting(db, 'email_send', 'false');
   ensureSetting(db, 'ai_calling', 'false');
+  ensureSetting(db, 'dry_run', 'true');
+  ensureSetting(db, 'live_outbound', 'false');
+  ensureSetting(db, 'sms_enabled', 'false');
+  ensureSetting(db, 'email_enabled', 'false');
+  ensureSetting(db, 'voice_enabled', 'false');
   return db;
 }
 

@@ -26,6 +26,36 @@ export function sendFlags(): SendFlags {
   };
 }
 
+export interface OutboundPolicy {
+  dryRun: boolean;
+  liveOutbound: boolean;
+  smsEnabled: boolean;
+  emailEnabled: boolean;
+  voiceEnabled: boolean;
+}
+
+/** Missing values stay off. Only the exact string "true" enables a live switch. */
+export function explicitTrue(value: string | undefined): boolean {
+  return value === 'true';
+}
+
+export function outboundPolicy(): OutboundPolicy {
+  return {
+    dryRun: process.env.DRY_RUN !== 'false',
+    liveOutbound: explicitTrue(process.env.LIVE_OUTBOUND),
+    smsEnabled: explicitTrue(process.env.SMS_ENABLED),
+    emailEnabled: explicitTrue(process.env.EMAIL_ENABLED),
+    voiceEnabled: explicitTrue(process.env.VOICE_ENABLED),
+  };
+}
+
+export function channelEnabled(channel: 'sms' | 'email' | 'voice'): boolean {
+  const policy = outboundPolicy();
+  if (channel === 'sms') return policy.smsEnabled;
+  if (channel === 'email') return policy.emailEnabled;
+  return policy.voiceEnabled;
+}
+
 export type ReleaseChannel = 'sms' | 'email' | 'voice' | 'calendar';
 
 /**
