@@ -47,6 +47,16 @@ export const FINANCING_STATES = [
 
 export type FinancingState = (typeof FINANCING_STATES)[number];
 
+export const SEARCH_STATES = [
+  'UNKNOWN',
+  'NOT_STARTED',
+  'CRITERIA_PARTIAL',
+  'ACTIVE',
+  'PAUSED',
+] as const;
+
+export type SearchState = (typeof SEARCH_STATES)[number];
+
 export const CLASSIFICATION_AXES = [
   'occupancy',
   'experience',

@@ -36,6 +36,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS client_identifiers_phone_email
   ON client_identifiers(kind, value_normalized)
   WHERE kind IN ('phone', 'email');
 
+CREATE UNIQUE INDEX IF NOT EXISTS client_identifiers_agent_tools
+  ON client_identifiers(kind, value_normalized)
+  WHERE kind = 'agent_tools_id';
+
 CREATE TABLE IF NOT EXISTS opportunities (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -812,15 +816,18 @@ function insertClient(db: SqlDb, input: {
   isDemo: boolean;
   now: Date;
   actor: string;
+  status?: 'active' | 'pending_enrichment' | 'needs_review';
 }): string {
   const id = randomUUID();
   const nowIso = input.now.toISOString();
+  const status = input.status ?? 'active';
   db.run(
     `INSERT INTO clients (id, contact_id, display_name, status, duplicate_of_client_id, assigned_agent, is_demo, created_at, updated_at)
-     VALUES (?, ?, ?, 'active', NULL, 'Kyle Kleinman', ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, NULL, 'Kyle Kleinman', ?, ?, ?)`,
     id,
     input.contactId,
     input.displayName,
+    status,
     input.isDemo ? 1 : 0,
     nowIso,
     nowIso,
@@ -969,7 +976,9 @@ function flagIdentity(db: SqlDb, input: {
   }, { clients: before });
 }
 
-function rememberIdentifier(db: SqlDb, clientId: string, kind: 'phone' | 'email', normalized: string | null, raw: string | null): void {
+export type CanonicalIdentifierKind = 'phone' | 'email' | 'agent_tools_id' | 'household';
+
+function rememberIdentifier(db: SqlDb, clientId: string, kind: CanonicalIdentifierKind, normalized: string | null, raw: string | null): void {
   if (!normalized) return;
   const existing = db.get(
     `SELECT client_id FROM client_identifiers WHERE kind = ? AND value_normalized = ?`,
@@ -989,7 +998,7 @@ function rememberIdentifier(db: SqlDb, clientId: string, kind: 'phone' | 'email'
   );
 }
 
-function clientByIdentifier(db: SqlDb, kind: 'phone' | 'email', normalized: string): string | null {
+function clientByIdentifier(db: SqlDb, kind: CanonicalIdentifierKind, normalized: string): string | null {
   const row = db.get(
     `SELECT client_id FROM client_identifiers WHERE kind = ? AND value_normalized = ?`,
     kind,
@@ -1049,4 +1058,152 @@ function audit(
     before === undefined ? null : JSON.stringify(before),
     JSON.stringify(after),
   );
+}
+
+export function findClientByIdentifier(db: SqlDb, kind: CanonicalIdentifierKind, raw: string | null): string | null {
+  const matches = findClientsByIdentifier(db, kind, raw);
+  return matches[0] ?? null;
+}
+
+export function findClientsByIdentifier(db: SqlDb, kind: CanonicalIdentifierKind, raw: string | null): string[] {
+  const normalized = normalizeIdentifier(kind, raw);
+  if (!normalized) return [];
+  return db.all(
+    `SELECT client_id FROM client_identifiers WHERE kind = ? AND value_normalized = ?`,
+    kind,
+    normalized,
+  ).map((row) => text(row, 'client_id'));
+}
+
+export function linkCanonicalIdentifier(db: SqlDb, clientId: string, kind: CanonicalIdentifierKind, raw: string | null): {
+  linked: boolean;
+  ownerClientId: string | null;
+} {
+  const normalized = normalizeIdentifier(kind, raw);
+  if (!normalized) return { linked: false, ownerClientId: null };
+  const owner = clientByIdentifier(db, kind, normalized);
+  if (owner && owner !== clientId) return { linked: false, ownerClientId: owner };
+  if (owner === clientId) return { linked: true, ownerClientId: clientId };
+  rememberIdentifier(db, clientId, kind, normalized, raw);
+  return { linked: true, ownerClientId: clientId };
+}
+
+export function flagCanonicalIdentity(db: SqlDb, input: {
+  clientIds: string[];
+  contactId?: string | null;
+  reason: string;
+  dedupeKey: string;
+  now?: Date;
+  actor?: string;
+}): void {
+  flagIdentity(db, {
+    clientIds: input.clientIds,
+    contactId: input.contactId ?? null,
+    reason: input.reason,
+    dedupeKey: input.dedupeKey,
+    now: input.now ?? new Date(),
+    actor: input.actor ?? 'system',
+  });
+}
+
+/** Keeps a record that must not be merged or dropped. Does not send. */
+export function openCanonicalShell(db: SqlDb, input: {
+  idempotencyKey: string;
+  source: string;
+  rawText: string;
+  displayName?: string | null;
+  status: 'pending_enrichment' | 'needs_review';
+  businessLine?: string;
+  isDemo?: boolean;
+  facts?: FactInput[];
+  now?: Date;
+  actor?: string;
+}): CanonicalIngestResult {
+  const now = input.now ?? new Date();
+  const actor = input.actor ?? 'system';
+  const key = input.idempotencyKey.trim();
+  const prior = db.get(`SELECT * FROM events WHERE idempotency_key = ?`, key);
+  if (prior) {
+    return {
+      status: 'duplicate',
+      clientId: text(prior, 'client_id') || null,
+      opportunityId: text(prior, 'opportunity_id') || null,
+      eventId: text(prior, 'id'),
+      flaggedClientIds: [],
+      factResults: [],
+      liveSend: false,
+      message: 'That event was already stored. No second client was created.',
+    };
+  }
+  const clientId = insertClient(db, {
+    contactId: null,
+    displayName: input.displayName ?? null,
+    isDemo: Boolean(input.isDemo),
+    now,
+    actor,
+    status: input.status,
+  });
+  const named = findClientsByName(db, input.displayName ?? null).filter((id) => id !== clientId);
+  if (named.length > 0) {
+    flagIdentity(db, {
+      clientIds: [clientId, ...named],
+      contactId: null,
+      reason: 'The name matches another client. Nothing was merged or deleted.',
+      dedupeKey: `shell-name:${[clientId, ...named].sort().join(':')}:${normalizeName(input.displayName ?? '')}`,
+      now,
+      actor,
+    });
+  }
+  const businessLine = input.businessLine?.trim() || 'redfin_buyer';
+  const opportunityId = ensureOpenOpportunity(db, {
+    clientId,
+    contactId: null,
+    businessLine,
+    sourceLabel: input.source,
+    isDemo: Boolean(input.isDemo),
+    now,
+    actor,
+  });
+  const factResults = (input.facts ?? []).map((fact) => writeClientFact(db, {
+    clientId,
+    opportunityId,
+    fact,
+    now,
+    actor,
+  }));
+  const eventId = insertEvent(db, {
+    idempotencyKey: key,
+    clientId,
+    opportunityId,
+    contactId: null,
+    kind: input.status === 'pending_enrichment' ? 'lead_pending_enrichment' : 'lead_needs_review',
+    isDemo: Boolean(input.isDemo),
+    now,
+    payload: {
+      source: input.source,
+      rawText: input.rawText,
+      displayName: input.displayName ?? null,
+      clientStatus: input.status,
+      dropped: false,
+    },
+  });
+  return {
+    status: input.status === 'pending_enrichment' ? 'needs_identity' : 'flagged',
+    clientId,
+    opportunityId,
+    eventId,
+    flaggedClientIds: named,
+    factResults,
+    liveSend: false,
+    message: input.status === 'pending_enrichment'
+      ? 'No verified phone or email. The record is pending enrichment and was not dropped.'
+      : 'The record is held for review. Nothing was merged or sent.',
+  };
+}
+
+function normalizeIdentifier(kind: CanonicalIdentifierKind, raw: string | null): string | null {
+  if (kind === 'phone') return normalizePhone(raw);
+  if (kind === 'email') return normalizeEmail(raw);
+  const value = raw?.trim() ?? '';
+  return value ? value : null;
 }

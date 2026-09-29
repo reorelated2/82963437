@@ -76,7 +76,7 @@ The older stage list (buyer queues, showings, offers, seller CMA, investor math)
 - `backend/` Playwright collector and OpenAI strategy route are a different product. The desk does not start them.
 - `mail.php` posts seller leads to a mailbox and is not connected.
 - The buyer ledger `opportunities` table and the desk `opportunities` table share a name and live in different files. The desk table is the canonical lead opportunity. The ledger table is the synthetic buyer workflow. Do not copy rows between them in this slice, and do not merge the files.
-- Draft PR #12 cannot merge to `main` until doc conflicts are resolved. `main` does not contain `ops/`. A merge-tree against `origin/main` conflicts on `.gitignore`, `README.md`, and the shared `docs/*.md` files that both lines added. `ops/` itself is only on this lineage. Do not drop it to clear the conflict.
+- Draft PR #12's documentation conflicts with `main` were resolved by merging `origin/main` into `cursor/lead-follow-up-os-5170` with a merge commit. `ops/` stayed. PR #17 then merged that updated branch. Neither pull request is merged into `main`.
 
 ## 6. What is unsafe
 
@@ -169,4 +169,25 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch: typecheck passed. `npm test` reported 92 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+2026-09-29 result on this branch after the Agent Tools loader: typecheck passed. `npm test` reported 97 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+
+## 9. Audit after `main` was merged
+
+Checked on 2026-09-29 against this branch, which now contains both `ops/` and the consult app from `main`.
+
+| Area | What exists | Reuse | Gap |
+| --- | --- | --- | --- |
+| Schemas | Desk SQLite in `ops/src/db.ts`. Canonical, communication, and conversion migrations on that same file. Buyer ledger in `ops/src/runtime/store.ts`. Unused Supabase SQL. Unmounted `backend/src/os` with its own sqlite path. | Desk file only for leads. | Do not merge the two SQLite files. |
+| Auth | Desk cookie session in `ops/src/auth.ts`. Default password `local-kyle`. API routes, including `POST /api/canonical/leads`, require that session. | Keep it. | No hosted login. Do not publish the port. |
+| Routes | Desk on `127.0.0.1:8787`. Consult app on `8080` only when someone starts `backend/`. `ENABLE_LEAD_DESK` must stay unset, so `backend/src/os` is not mounted. | Desk routes for KyleOS. | GitHub Pages (`.github/workflows/static.yml`) deploys static `main` only. It does not run the desk. |
+| Webhooks | `POST /api/canonical/leads` is the authenticated ingest. Idempotency key required. | `ingestCanonicalLead`. | It is not a public Redfin webhook. No Agent Tools API is connected. |
+| Tests | `cd ops && npx tsc --noEmit && npm test`. `cd backend && npx tsc --noEmit && npm test`. | Both. | `mobile/` has typecheck and no test script. Dependencies there are not installed in this run, so mobile typecheck was not run. No root lint script. |
+| Integrations | Provider shells and the Notion contract. Runtime adapters refuse a live Agent Tools write. | Adapters and mocks. | No Redfin, MLS, Quo, Gmail, Twilio, or Vapi credentials. |
+| Deployment | Local process only. | `npm start` in `ops/`. | No production host. |
+| Conflicts | PR #12 and PR #17 were conflict-free after the merge commits `58d6dd5` and `05de303`. | Keep both. | Do not force-push. Do not merge either PR into `main` without an explicit release. |
+
+## 10. Agent Tools lead ingestion
+
+The contract is `docs/AGENT_TOOLS_INGESTION.md`. The loader is `ops/src/ingest/agentTools.ts`. It reuses `ingestCanonicalLead`, identity flags, workflow locks, and the conversion engine. A record with no verified phone or email becomes a client with status `pending_enrichment` and is not dropped. Matches use verified email, verified phone, and Agent Tools source id. A household id or a display name flags a review and does not merge. Files with more than 8 records are refused unless `onlyRecordId` names one lead.
+
+The real 28-record export (26 leads and 2 `needs_review`) is not in this repo. `ops/fixtures/agent-tools-leads.sample.json` is a 4-record synthetic file with the same shape. Nothing in this loader calls Agent Tools or sends a message.

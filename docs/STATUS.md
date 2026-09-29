@@ -11,6 +11,7 @@ Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 stay
 - Phase 3 conversion engine, still dry-run: buyer stage and readiness flags, confirmed-only classification, one next intake question, financing states and lender handoff, sale-linked seller opportunity, renter reverse timeline, draft consult requests, one next-best action, and Level 4 handoff cards. Migration `2026-09-29-conversion`.
 - Phase 4 on the same file: seller intake and seller stages, approval queue, dry-run SMS/email/voice gate, fact review, and the Notion sync contract. Live send stays off.
 - Architecture map: `docs/KYLE_OS_ARCHITECTURE.md`. Notion contract: `docs/NOTION_SYNC_CONTRACT.md`.
+- Agent Tools ingestion contract: `docs/AGENT_TOOLS_INGESTION.md`. Loader: `ops/src/ingest/agentTools.ts`. Synthetic fixture only. The 28-record export is not in the repo. Bulk apply is refused.
 
 ## Verified this run
 
@@ -20,7 +21,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test`: **92 passed, 0 failed**.
+Typecheck passed. `npm test`: **97 passed, 0 failed** on 2026-09-29 after the Agent Tools dry-run loader. The five new checks are in `ops/test/agent-tools-ingest.test.ts`.
 
 The first test run, before Pillow was installed, was 51 passed and 1 failed. The failure was the screenshot fixture (`Pillow is required to draw the screenshot fixture.`). After Pillow was installed, that test passed with the rest. Pillow is an environment tool, not an `ops` dependency.
 
@@ -48,7 +49,7 @@ No live SMS, email, or call was sent. No Redfin or MLS API was added. `sent_mess
 
 ## Next
 
-Keep `DRY_RUN`. The next useful slice is a reviewed Notion sync that follows `docs/NOTION_SYNC_CONTRACT.md` and still does not send. Live SMS, email, calling, and lender handoff stay off until Kyle supplies credentials and a sandbox call returns `not_attempted`.
+Keep `DRY_RUN`. The next milestone is one real Agent Tools lead, chosen by `onlyRecordId`, still with no send and no Agent Tools write. Live SMS, email, calling, and lender handoff stay off until Kyle supplies credentials and a sandbox call returns `not_attempted`.
 
 ## Buyer Command Center (`backend/` and `mobile/`)
 

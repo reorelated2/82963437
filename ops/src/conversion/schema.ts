@@ -187,6 +187,7 @@ const OPPORTUNITY_COLUMNS: Array<[string, string]> = [
   ['last_meaningful_contact_at', 'ALTER TABLE opportunities ADD COLUMN last_meaningful_contact_at TEXT'],
   ['last_meaningful_contact_by', 'ALTER TABLE opportunities ADD COLUMN last_meaningful_contact_by TEXT'],
   ['contact_verification', 'ALTER TABLE opportunities ADD COLUMN contact_verification TEXT'],
+  ['search_state', 'ALTER TABLE opportunities ADD COLUMN search_state TEXT'],
 ];
 
 const EXTRA_COLUMNS: Array<[string, string, string]> = [
