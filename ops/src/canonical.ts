@@ -114,6 +114,8 @@ export interface FactInput {
   kind: FactKind;
   verification: FactVerification;
   source: string;
+  /** Source snapshot time. Stored on the fact. Falls back to the write time. */
+  observedAt?: string;
 }
 
 export interface FactWriteResult {
@@ -488,6 +490,7 @@ export function writeClientFact(db: SqlDb, input: {
 }): FactWriteResult {
   const actor = input.actor ?? 'system';
   const nowIso = input.now.toISOString();
+  const observedIso = input.fact.observedAt?.trim() || nowIso;
   const fieldKey = input.fact.fieldKey.trim();
   const value = input.fact.value.trim();
   const kind: FactKind = input.fact.kind === 'inference' ? 'inference' : 'fact';
@@ -537,7 +540,7 @@ export function writeClientFact(db: SqlDb, input: {
       kind,
       verification,
       input.fact.source,
-      nowIso,
+      observedIso,
       nowIso,
     );
     audit(db, actor, kind === 'inference' ? 'inference_stored' : 'fact_stored', null, 'client_fact', input.clientId, {
@@ -583,7 +586,7 @@ export function writeClientFact(db: SqlDb, input: {
     verification,
     input.fact.source,
     input.opportunityId,
-    nowIso,
+    observedIso,
     nowIso,
     text(existing, 'id'),
   );

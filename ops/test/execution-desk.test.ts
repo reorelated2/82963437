@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import { nextBestAction, openBuyerFile } from '../src/conversion/engine.ts';
 import { ingestCanonicalLead } from '../src/canonical.ts';
 import { buildMorningBrief } from '../src/execution/brief.ts';
 import { seedHot7 } from '../src/execution/hot7.ts';
+import { loadCanonicalStagingBuyer } from '../src/ingest/agentTools.ts';
 import { applyManualMark } from '../src/execution/marks.ts';
 import { EVAL_SCENARIOS } from '../src/execution/eval.ts';
 import { planDesk, type DeskEvidence, type DeskFact } from '../src/execution/plan.ts';
@@ -391,6 +392,20 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.match(echo.showingLines.join('\n'), /TOUR 9\/27, outcome not confirmed/);
   assert.doesNotMatch(`${echo.whyNow}\n${echo.humanAction}\n${echo.showingLines.join('\n')}`, /SHOWING CONFLICT|upcoming/i);
   assert.equal(echo.tier, 'TIER 0');
+  const tierNumber = (tier: string) => Number(tier.replace(/\D/g, ''));
+  for (let index = 1; index < brief.cards.length; index += 1) {
+    const previous = brief.cards[index - 1];
+    const current = brief.cards[index];
+    assert.ok(previous && current);
+    assert.ok(tierNumber(previous.tier) <= tierNumber(current.tier), `${previous.clientName} ${previous.tier} before ${current.clientName} ${current.tier}`);
+  }
+  const markIndex = brief.cards.findIndex((card) => card.clientName === 'Mark Maccagno');
+  const katherineIndex = brief.cards.findIndex((card) => card.clientName === 'Katherine De Armas');
+  const albertoIndex = brief.cards.findIndex((card) => card.clientName === 'Alberto Alonso');
+  assert.ok(markIndex >= 0 && markIndex < katherineIndex && markIndex < albertoIndex);
+  assert.match(brief.cards[markIndex]?.primaryAction ?? '', /REVIEW THE OFFER REQUEST/);
+  assert.match(brief.cards[markIndex]?.humanAction ?? '', /GET MARK MACCAGNO'S CELL/);
+  assert.doesNotMatch(brief.cards[markIndex]?.primaryAction ?? '', /^GET /);
   assert.doesNotMatch(echo.showingLines.join('\n'), /SHOWING_COMPLETED/);
   const claudia = brief.cards.find((card) => card.clientName === 'Claudia Pinheiro');
   assert.match(claudia?.humanAction ?? '', /CALL/);
@@ -556,6 +571,75 @@ test('prompt modules stay versioned and the voice screen rejects the banned comm
   assert.equal(screenKyleVoice('Echo, did you end up seeing the place?').allowed, true);
   assert.ok(EVAL_SCENARIOS.includes('past showing unknown outcome'));
   assert.ok(EVAL_SCENARIOS.includes('two tours are not a conflict'));
+});
+
+test('a stale snapshot is labeled and an old happened draft is not reused', () => {
+  const card = planDesk(evidence({
+    name: 'Snapshot',
+    facts: [
+      verified('property_address', '10 Fixture St'),
+      { field: 'buying_activity', value: '0 tours Sep 20 - Upcoming tour agent scheduled with Kyle Kleinman', kind: 'fact', verification: 'unverified' },
+      { field: 'showing_detail', value: 'date=9/20; time=4 PM; agent=DATA NEEDED; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED', kind: 'fact', verification: 'unverified' },
+      { field: 'showing_detail_2', value: 'date=9/27; time=6 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED', kind: 'fact', verification: 'unverified' },
+      { field: 'agent_tools_snapshot', value: 'captured=2026-09-28; the export still describes the earlier tour as not yet held; later tour detail is on file; stale=yes', kind: 'fact', verification: 'unverified' },
+      { field: 'sms_draft', value: 'Unsent draft claims the tour already happened.', kind: 'inference', verification: 'unverified' },
+    ],
+  }));
+  assert.match(card.whyNow, /STALE SNAPSHOT/);
+  assert.doesNotMatch(`${card.whyNow} ${card.humanAction} ${card.clientDraft ?? ''} ${card.showingLines.join(' ')}`, /upcoming/i);
+  assert.match(card.agentToolsNote, /was not sent/);
+  assert.doesNotMatch(card.clientDraft ?? '', /already happened/);
+  assert.equal(card.showingState, 'OUTCOME_UNKNOWN');
+  assert.ok(card.showingLines.some((line) => line.includes('9/27 6 PM Larry Dix')));
+  assert.ok(card.showingLines.some((line) => line.includes('DATA NEEDED')));
+});
+
+test('one staging buyer is stored through the existing loader with the snapshot date', () => {
+  const db = tempDb();
+  const dir = mkdtempSync(join(tmpdir(), 'kyleos-staging-'));
+  const file = join(dir, 'staging.json');
+  writeFileSync(file, JSON.stringify({
+    meta: { generated_at: '2026-09-29T03:05:24-04:00' },
+    records: [{
+      staging_id: 'AT-STG-TEST',
+      identity: { full_name: 'Fixture Buyer', phones: [{ value: '3055550199', verified: true }], emails: [] },
+      provenance: { sources: [
+        { system: 'agent_tools', captured_at: '2026-09-28T16:19:39-04:00' },
+        { system: 'gmail_redfin', captured_at: '2026-09-28T09:23:28-04:00' },
+      ] },
+      facts: [
+        { field: 'appointment', value: { date: '2026-09-20', time: '4:00 PM EDT' } },
+        { field: 'appointment', value: { date: '2026-09-27', time: '6:00 PM EDT', attending_agent: 'Larry Dix' } },
+        { field: 'agent_tools.buying_activity', value: '0 tours Sep 20 - Upcoming tour agent scheduled with Kyle Kleinman' },
+        { field: 'property_discussed', value: { address: '10 Fixture St', status: 'toured_or_scheduled' } },
+        { field: 'redfin_customer_id', value: 'should-not-be-stored' },
+      ],
+      searches: [],
+      inferences: [],
+      mapping_issues: [
+        'The export appears stale for this client.',
+        "An unsent draft says the tour already happened.",
+      ],
+    }, {
+      staging_id: 'AT-STG-OTHER',
+      identity: { full_name: 'Other Buyer', phones: [{ value: '3055550188', verified: true }] },
+      facts: [],
+    }],
+  }));
+  const loaded = loadCanonicalStagingBuyer(db, file, 'AT-STG-TEST', { now: NOW });
+  assert.equal(loaded.applied, true);
+  assert.equal(loaded.liveSend, false);
+  assert.equal(loaded.results.length, 1);
+  const observed = db.get(`SELECT observed_at FROM client_facts WHERE field_key = 'buying_activity'`);
+  assert.equal(text(observed, 'observed_at'), '2026-09-28T16:19:39-04:00');
+  assert.equal(db.get(`SELECT value FROM client_facts WHERE field_key = 'redfin_customer_id'`), undefined);
+  const brief = buildMorningBrief(db, NOW);
+  assert.equal(brief.cards.length, 1);
+  assert.equal(brief.cards[0]?.clientName, 'Fixture Buyer');
+  assert.match(brief.cards[0]?.whyNow ?? '', /STALE SNAPSHOT/);
+  assert.doesNotMatch(brief.cards[0]?.clientDraft ?? '', /already happened/);
+  assert.equal(brief.live, false);
+  db.close();
 });
 
 test('the production clock is America/New_York and tests inject the instant', () => {

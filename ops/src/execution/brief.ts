@@ -98,7 +98,7 @@ export function buildMorningBrief(db: SqlDb, now = productionNow()): MorningBrie
       });
     }
   }
-  const ordered = [...cards].sort((left, right) => right.priority - left.priority || right.hotScore - left.hotScore);
+  const ordered = [...cards].sort((left, right) => tierRank(left.tier) - tierRank(right.tier) || right.priority - left.priority || right.hotScore - left.hotScore);
   ordered.forEach((card, index) => {
     card.priority = index + 1;
   });
@@ -119,6 +119,11 @@ export function buildMorningBrief(db: SqlDb, now = productionNow()): MorningBrie
     friday: fridayReport(db, now),
     clock: easternClock(now),
   };
+}
+
+function tierRank(tier: string): number {
+  const match = tier.match(/\d+/);
+  return match ? Number(match[0]) : 9;
 }
 
 function identifier(db: SqlDb, clientId: string, kind: string): string | null {

@@ -170,6 +170,10 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     const showing = collectShowingLines(input.facts);
     full.showingLines = showing.lines;
     full.showingConflict = showing.conflict;
+    const snapshot = any('agent_tools_snapshot');
+    if (snapshot && /stale=yes/i.test(snapshot) && !/STALE SNAPSHOT/.test(full.whyNow)) {
+      full.whyNow = `STALE SNAPSHOT. ${snapshot} ${full.whyNow}`;
+    }
     const promise = verified('kyle_promise') ?? any('kyle_promise');
     full.promise = promise && !/kept|done/i.test(promise) ? promise : null;
     if (full.promise) {
@@ -728,6 +732,31 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       agentToolsNote: note('Offer interest is not an offer submission.'),
       followUp: 'Their price.',
       internalCode: 'offer_interest',
+    });
+  }
+
+  if (/offer request/i.test(any('recent_note') ?? '')) {
+    const request = any('recent_note') ?? 'Offer request is on file.';
+    return finish({
+      ...base,
+      priority: 86,
+      whyNow: `${request} This is an offer request, not offer ready.`,
+      humanAction: `REVIEW THE OFFER REQUEST. ${request} It is not a confirmed submission.`,
+      clientDraft: null,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'Whether they still want to write, and the missing terms.',
+      ifYesNext: 'Collect one missing term. Do not submit from this screen.',
+      ifNoNext: 'Leave the request unwritten.',
+      ifUnclearNext: 'Ask once if they still want to write.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: showing.state,
+      customerPropertyState: 'Offer requested',
+      agentToolsNote: note(`${request} It is not a confirmed submission.`),
+      followUp: 'The next missing term, after a cell is on file.',
+      internalCode: 'offer_request',
     });
   }
 
@@ -1496,6 +1525,20 @@ function concrete(values: string[]): string[] {
   return found;
 }
 
+function hasPastTour(input: DeskEvidence): boolean {
+  const today = zonedParts(input.now);
+  for (const fact of input.facts) {
+    const scheduledLine = /showing_detail/.test(fact.field) || scheduledTourLanguage(fact.field, fact.value);
+    if (!scheduledLine || !isShowingFact(fact)) continue;
+    const line = formatShowingLine(fact);
+    if (!line || line.date === 'DATA NEEDED') continue;
+    const [month, day] = line.date.split('/').map(Number);
+    if (!month || !day) continue;
+    if (month < today.month || (month === today.month && day < today.day)) return true;
+  }
+  return false;
+}
+
 function showingFallsToday(lines: string[], now: Date): boolean {
   const parts = zonedParts(now);
   const label = `${parts.month}/${parts.day}`;
@@ -1671,6 +1714,7 @@ function deriveShowing(input: DeskEvidence, property: string | null): { state: s
     return { state: 'OUTCOME_UNKNOWN', customerState: 'Unknown', associateOnly: true };
   }
   if (scheduled && past) return { state: 'OUTCOME_UNKNOWN', customerState: 'Scheduled', associateOnly: false };
+  if (hasPastTour(input)) return { state: 'OUTCOME_UNKNOWN', customerState: 'Scheduled', associateOnly: false };
   if (verified('showing_requested') || /tour request/i.test(scheduled)) {
     return { state: 'CUSTOMER_REQUESTED', customerState: 'Requested', associateOnly: false };
   }
