@@ -66,6 +66,7 @@ export interface ExecutionCard {
   milestones: TransactionMilestone[];
   showingLines: string[];
   showingConflict: string | null;
+  tourDayKeys: string[];
   tier: 0 | 1 | 2 | 3;
   horizon: 'SHORT' | 'MID' | 'LONG';
   actionVerb: string;
@@ -115,7 +116,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     hotScore: Number.isFinite(hotScore) ? hotScore : 0,
   };
 
-  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict' | 'tier' | 'horizon' | 'actionVerb' | 'executionAdapter' | 'phone' | 'waitingOn' | 'promiseLine' | 'workflowDrift' | 'showingLabel'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
+  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict' | 'tier' | 'horizon' | 'actionVerb' | 'executionAdapter' | 'phone' | 'waitingOn' | 'promiseLine' | 'workflowDrift' | 'showingLabel' | 'tourDayKeys'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
     const full = { ...card, manualActionRequired: true as const, approvalRequired: true as const, live: false as const } as ExecutionCard;
     for (const draft of [full.clientDraft, full.callOpening, full.emailDraft]) {
       if (!draft) continue;
@@ -168,9 +169,10 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     full.transactionLine = transactionLine(input.facts);
     full.milestones = transactionMilestones(input.facts);
     full.showingTransitions = justifiedShowings(input, full.showingState);
-    const showing = collectShowingLines(input.facts);
+    const showing = collectShowingLines(input.facts, input.now);
     full.showingLines = showing.lines;
     full.showingConflict = showing.conflict;
+    full.tourDayKeys = showing.tourDayKeys;
     if (showing.conflict && !/SHOWING CONFLICT/.test(full.whyNow)) {
       full.whyNow = `${full.whyNow} ${showing.conflict}`;
     }
@@ -213,7 +215,8 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     full.waitingOn = verified('waiting_active') === 'yes' ? (verified('waiting_party') || 'CLIENT') : null;
     full.promiseLine = verified('promise_open') === 'yes' ? verified('kyle_promise') : null;
     full.workflowDrift = false;
-    full.showingLabel = showingLabel(full.showingState);
+    full.clientStage = stageFromEvidence(input, full.showingState);
+    full.showingLabel = full.internalCode === 'property_pivot' ? 'THIRD PARTY REPORTED' : showingLabel(full.showingState);
     if (full.showingState === 'OUTCOME_UNKNOWN') {
       full.showingLines = full.showingLines.map((line) => line.replace(/\bupcoming\b/gi, 'past scheduled'));
       if (full.customerPropertyState === 'Scheduled') full.customerPropertyState = 'Past scheduled';
@@ -353,6 +356,38 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       agentToolsNote: note(`Waiting on ${party}. No new outreach was prepared.`),
       followUp: end,
       internalCode: 'waiting',
+    });
+  }
+
+  const reportedTour = thirdPartyTourReport(input.facts);
+  if (reportedTour) {
+    const place = reportedTour.property || property;
+    const draft = reportedTour.cashOnly
+      ? `${first(input.name)}, you passed on ${place ?? 'that home'} because it was cash only. Do you want options that take financing?`
+      : reportedTour.passed
+        ? `${first(input.name)}, you passed on ${place ?? 'that home'}. What was missing?`
+        : `${first(input.name)}, the touring agent reported you saw ${place ?? 'the place'}. What did you think once you got inside?`;
+    const who = reportedTour.agent && reportedTour.agent !== 'DATA NEEDED' ? ` from ${reportedTour.agent}` : '';
+    return finish({
+      ...base,
+      priority: 90,
+      whyNow: `A touring agent reported the outcome${who}. That report is third party. It is not a completion verified by Kyle.`,
+      humanAction: `TEXT ${input.name.toUpperCase()} NOW.`,
+      clientDraft: draft.replace(/[—–]/g, ','),
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: reportedTour.cashOnly ? 'Whether they want homes that take financing.' : 'What they want next on a different home.',
+      ifYesNext: reportedTour.cashOnly ? 'Send options that take financing. Do not send another cash-only home.' : 'One next question from that answer.',
+      ifNoNext: 'Ask what should change before another home goes out.',
+      ifUnclearNext: 'Ask the same question once. Do not ask whether they attended.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: 'OUTCOME_UNKNOWN',
+      customerPropertyState: 'Third party reported',
+      agentToolsNote: note(`Third party report${who}. ${reportedTour.cashOnly ? `The client passed on ${place ?? 'the home'} because it was cash only.` : `Reported outcome: ${reportedTour.outcome}.`} Not verified by Kyle.`),
+      followUp: 'Their answer about the next home.',
+      internalCode: 'property_pivot',
     });
   }
 
@@ -1580,13 +1615,18 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     });
   }
 
+  const options = any('property_options');
   const draft = property
     ? `${first(input.name)}, Kyle with Redfin. I'm checking on ${property} now. Is that the main one you want to see?`
     : `${first(input.name)}, Kyle with Redfin. What property should I look at first?`;
   return finish({
     ...base,
     priority: 50,
-    whyNow: property ? 'Handle the property they asked about before qualification.' : 'The property is not on file.',
+    whyNow: property
+      ? 'Handle the property they asked about before qualification.'
+      : options
+        ? 'Several properties are on file. None is tied to a tour, so the first one was not chosen.'
+        : 'The property is not on file.',
     humanAction: `TEXT ${input.name.toUpperCase()} NOW.`,
     clientDraft: draft,
     callOpening: null,
@@ -1610,20 +1650,51 @@ const SHOWING_MONTHS: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
 
-function collectShowingLines(facts: DeskFact[]): { lines: string[]; conflict: string | null } {
-  const lines: string[] = [];
-  const dates: string[] = [];
+function collectShowingLines(facts: DeskFact[], now: Date): { lines: string[]; conflict: string | null; tourDayKeys: string[] } {
+  const pending: Array<{ text: string; dayKey: string | null; timeKey: string | null; display: string; structured: boolean; note: boolean }> = [];
   for (const fact of facts) {
     if (!isShowingFact(fact)) continue;
-    const line = formatShowingLine(fact);
-    if (!line || lines.includes(line.text)) continue;
-    lines.push(line.text);
-    if (line.date !== 'DATA NEEDED' && !dates.includes(line.date)) dates.push(line.date);
+    const line = formatShowingLine(fact, now);
+    if (!line || pending.some((item) => item.text === line.text)) continue;
+    pending.push({
+      text: line.text,
+      dayKey: line.dayKey,
+      timeKey: line.timeKey,
+      display: line.date,
+      structured: /date=/.test(fact.value),
+      note: /scheduled_tour_note/.test(fact.field),
+    });
   }
-  const conflict = dates.length > 1
-    ? `SHOWING CONFLICT: ${dates.join(' and ')} are both on file. Do not pick one. Outcome is not confirmed.`
-    : null;
-  return { lines, conflict };
+  const kept = pending.filter((line) => {
+    if (!line.note || !line.dayKey) return true;
+    return !pending.some((other) => other.structured && other.dayKey === line.dayKey && (!line.timeKey || !other.timeKey || other.timeKey === line.timeKey));
+  });
+  const slots = kept.filter((line): line is typeof line & { dayKey: string } => Boolean(line.dayKey));
+  return {
+    lines: kept.map((line) => line.text),
+    conflict: showingConflict(slots),
+    tourDayKeys: [...new Set(slots.map((slot) => slot.dayKey))],
+  };
+}
+
+function showingConflict(slots: Array<{ dayKey: string; timeKey: string | null; display: string }>): string | null {
+  const days: Array<{ dayKey: string; display: string; times: string[] }> = [];
+  for (const slot of slots) {
+    let day = days.find((item) => item.dayKey === slot.dayKey);
+    if (!day) {
+      day = { dayKey: slot.dayKey, display: slot.display, times: [] };
+      days.push(day);
+    }
+    if (slot.timeKey && !day.times.includes(slot.timeKey)) day.times.push(slot.timeKey);
+  }
+  if (days.length > 1) {
+    return `SHOWING CONFLICT: ${days.map((day) => day.display).join(' and ')} are both on file. Do not pick one. Outcome is not confirmed.`;
+  }
+  const only = days[0];
+  if (only && only.times.length > 1) {
+    return `SHOWING CONFLICT: ${only.times.map((time) => `${only.display} ${time}`).join(' and ')} are both on file. Do not pick one. Outcome is not confirmed.`;
+  }
+  return null;
 }
 
 function isShowingFact(fact: DeskFact): boolean {
@@ -1634,18 +1705,88 @@ function isShowingFact(fact: DeskFact): boolean {
   return /upcoming tour|tour agent scheduled|scheduled tour|\btour\b|showing/i.test(fact.value);
 }
 
-function formatShowingLine(fact: DeskFact): { text: string; date: string } | null {
+function formatShowingLine(fact: DeskFact, now: Date): { text: string; date: string; dayKey: string | null; timeKey: string | null } | null {
   const structured = parseStructuredShowing(fact.value);
-  const date = structured?.date || proseDate(fact.value) || 'DATA NEEDED';
-  const time = structured?.time || proseTime(fact.value) || 'DATA NEEDED';
+  const rawDate = structured?.date || proseDate(fact.value) || '';
+  const date = displayTourDate(rawDate) || 'DATA NEEDED';
+  const rawTime = structured?.time || proseTime(fact.value) || '';
+  const time = proseTime(rawTime) || proseTime(fact.value) || rawTime || 'DATA NEEDED';
   const agent = structured?.agent || proseAgent(fact.value) || 'DATA NEEDED';
   const outcome = structured?.outcome || proseOutcome(fact.value);
   const evidence = structured?.evidenceClass || showingEvidenceClass(fact);
   if (date === 'DATA NEEDED' && time === 'DATA NEEDED' && agent === 'DATA NEEDED') return null;
+  const dayKey = tourDayKey(rawDate || fact.value, now);
+  const timeKey = time === 'DATA NEEDED' ? null : time;
   return {
     date,
+    dayKey,
+    timeKey,
     text: `${date} ${time} ${agent} showing, ${outcome}. Evidence: ${evidence}.`,
   };
+}
+
+function displayTourDate(raw: string): string | null {
+  const fromProse = proseDate(raw);
+  if (fromProse) return fromProse;
+  const slash = raw.match(/\b(\d{1,2})\/(\d{1,2})(?:\/20\d{2})?\b/);
+  if (slash?.[1] && slash[2]) return `${Number(slash[1])}/${Number(slash[2])}`;
+  return null;
+}
+
+function tourDayKey(raw: string, now: Date): string | null {
+  const iso = raw.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso?.[1] && iso[2] && iso[3]) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const slash = raw.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?\b/);
+  if (slash?.[1] && slash[2]) {
+    const year = slash[3] ?? easternYear(now);
+    return `${year}-${slash[1].padStart(2, '0')}-${slash[2].padStart(2, '0')}`;
+  }
+  const month = raw.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i);
+  if (!month?.[1] || !month[2]) return null;
+  const number = SHOWING_MONTHS[month[1].slice(0, 3).toLowerCase()];
+  if (!number) return null;
+  return `${easternYear(now)}-${String(number).padStart(2, '0')}-${month[2].padStart(2, '0')}`;
+}
+
+function easternYear(now: Date): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric' }).format(now);
+}
+
+export function easternDateKey(now: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
+function thirdPartyTourReport(facts: DeskFact[]): { property: string | null; agent: string; outcome: string; cashOnly: boolean; passed: boolean } | null {
+  const fact = facts.find((item) => item.field === 'third_party_tour_report');
+  if (!fact) return null;
+  const grab = (key: string) => fact.value.match(new RegExp(`(?:^|;)\\s*${key}=([^;]+)`))?.[1]?.trim() ?? '';
+  const property = grab('property') || null;
+  return {
+    property,
+    agent: grab('agent'),
+    outcome: grab('outcome') || 'REPORTED BY TOURING AGENT',
+    cashOnly: grab('cash_only') === 'yes' || /cash[\s-]*only/i.test(fact.value),
+    passed: grab('passed') === 'yes' || /PASSED/i.test(grab('outcome')),
+  };
+}
+
+function stageFromEvidence(input: DeskEvidence, showingState: string): string {
+  const preference = input.facts.find((fact) => fact.field === 'contact_preference')?.value ?? '';
+  if (input.dnc || /stop|do not contact/i.test(preference)) return 'DO_NOT_CONTACT';
+  if (input.stage === 'CLOSED' || input.stage === 'PAST_CLIENT' || input.stage === 'LOST') return input.stage;
+  if (input.stage === 'UNDER_CONTRACT') return 'UNDER_CONTRACT';
+  if (input.stage === 'OFFER_SUBMITTED') return 'OFFER_SUBMITTED';
+  const touring = new Set([
+    'OUTCOME_UNKNOWN', 'SHOWING_SCHEDULED', 'SHOWING_COMPLETED', 'SHOWING_CANCELLED', 'CUSTOMER_REQUESTED',
+    'RESCHEDULE_NEEDED', 'ACCESS_PENDING', 'ACCESS_CONFIRMED', 'BUYER_NOTIFIED', 'BUYER_ACKNOWLEDGED',
+    'SHOWING_REQUEST_CREATED', 'LISTING_SIDE_CONTACTED',
+  ]);
+  const tourFact = input.facts.some((fact) => isShowingFact(fact) || fact.field === 'third_party_tour_report' || /scheduled_tour_note/.test(fact.field));
+  if (touring.has(showingState) || tourFact) return 'TOURING';
+  const search = input.facts.find((fact) => fact.field === 'saved_search' && fact.kind === 'fact' && fact.verification === 'verified');
+  if (search) return 'SEARCH_ACTIVE';
+  if (input.stage && input.stage !== 'NEW_INQUIRY') return input.stage;
+  return 'NEW_INQUIRY';
 }
 
 function parseStructuredShowing(value: string): { date: string; time: string; agent: string; outcome: string; evidenceClass: string } | null {
@@ -1817,15 +1958,30 @@ function bucket(label: string, cards: ExecutionCard[], include: (card: Execution
   return { label, count: hits.length, links: hits.map((card) => ({ name: card.clientName, anchor: card.anchor })) };
 }
 
-export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]; summary: BriefBucket[] } {
+const COORDINATING_SHOWINGS = new Set(['SHOWING_SCHEDULED', 'ACCESS_PENDING', 'ACCESS_CONFIRMED', 'BUYER_NOTIFIED', 'BUYER_ACKNOWLEDGED']);
+
+function showingIsToday(card: ExecutionCard, todayKey: string): boolean {
+  return COORDINATING_SHOWINGS.has(card.showingState) && (card.tourDayKeys ?? []).includes(todayKey);
+}
+
+function showingIsUpcoming(card: ExecutionCard, todayKey: string): boolean {
+  if (!COORDINATING_SHOWINGS.has(card.showingState)) return false;
+  const days = card.tourDayKeys ?? [];
+  if (days.some((day) => day > todayKey)) return true;
+  return days.length === 0 && (card.showingState === 'SHOWING_SCHEDULED' || card.showingState === 'ACCESS_PENDING');
+}
+
+export function morningSections(cards: ExecutionCard[], now = new Date()): { header: BriefBucket[]; summary: BriefBucket[] } {
+  const todayKey = easternDateKey(now);
   const missing = (card: ExecutionCard) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction);
-  const postTour = (card: ExecutionCard) => card.showingState === 'OUTCOME_UNKNOWN';
+  const postTour = (card: ExecutionCard) => card.showingState === 'OUTCOME_UNKNOWN' || card.internalCode === 'property_pivot';
   const offers = (card: ExecutionCard) => card.internalCode.startsWith('offer_')
     || /Offer request only|not offer ready/i.test(card.offerReadiness.nextAction)
     || (/offer request/i.test(`${card.whyNow} ${card.agentToolsNote}`) && !/No offer request is on file/i.test(card.offerReadiness.nextAction));
   const header: BriefBucket[] = [
     bucket('Actionable clients', cards, (card) => card.internalCode !== 'do_not_contact'),
-    bucket('Showings today', cards, (card) => card.showingState === 'ACCESS_PENDING' || card.showingState === 'SHOWING_SCHEDULED'),
+    bucket('Showings today', cards, (card) => showingIsToday(card, todayKey)),
+    bucket('Upcoming showings', cards, (card) => showingIsUpcoming(card, todayKey)),
     bucket('Showings requiring confirmation', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
     bucket('Hot post-tour clients', cards, postTour),
     bucket('Offers or offer requests', cards, offers),
@@ -1845,7 +2001,8 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     bucket('EMAILS TO SEND', cards, (card) => Boolean(card.emailDraft)),
     bucket('LISTING AGENTS TO CONTACT', cards, (card) => card.internalCode === 'listing_agent_missing'),
     bucket('SHOWINGS TO CONFIRM', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
-    bucket('SHOWINGS TODAY', cards, (card) => card.showingState === 'ACCESS_PENDING' || card.showingState === 'SHOWING_SCHEDULED'),
+    bucket('SHOWINGS TODAY', cards, (card) => showingIsToday(card, todayKey)),
+    bucket('UPCOMING SHOWINGS', cards, (card) => showingIsUpcoming(card, todayKey)),
     bucket('POST TOUR FOLLOW UPS', cards, postTour),
     bucket('FINANCING ITEMS', cards, (card) => card.internalCode === 'needs_preapproval'),
     bucket('BUY AFTER SELL ITEMS', cards, (card) => card.internalCode === 'sale_dependency' || card.internalCode === 'cma_needed'),
@@ -1887,7 +2044,7 @@ export function easternClock(now: Date): { date: string; easternTime: string } {
 export function renderMorningBrief(cards: ExecutionCard[], now: Date, clockSource: 'production' | 'injected' = 'production'): string {
   const clock = easternClock(now);
   const ordered = [...cards];
-  const sections = morningSections(ordered);
+  const sections = morningSections(ordered, now);
   const lines = [
     'KYLEOS MORNING BRIEF',
     `Date: ${clock.date}`,
@@ -1940,7 +2097,7 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date, clockSourc
 }
 
 const TIER_0 = new Set([
-  'tour_follow_up', 'call_requested', 'promise', 'offer_accepted', 'offer_submitted', 'offer_draft',
+  'tour_follow_up', 'property_pivot', 'call_requested', 'promise', 'offer_accepted', 'offer_submitted', 'offer_draft',
   'offer_interest', 'offer_terms_missing', 'closed', 'effective_date', 'inspection_deadline',
   'walkthrough_scheduled', 'loan_not_ctc', 'calendar_conflict',
 ]);

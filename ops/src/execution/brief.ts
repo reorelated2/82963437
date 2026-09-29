@@ -110,7 +110,7 @@ export function buildMorningBrief(db: SqlDb, now?: Date): MorningBrief {
       });
     }
   }
-  const ordered = [...cards].sort((left, right) => right.priority - left.priority || right.hotScore - left.hotScore);
+  const ordered = [...cards].sort((left, right) => left.tier - right.tier || right.priority - left.priority || right.hotScore - left.hotScore || left.clientName.localeCompare(right.clientName));
   ordered.forEach((card, index) => {
     card.priority = index + 1;
   });
@@ -126,7 +126,7 @@ export function buildMorningBrief(db: SqlDb, now?: Date): MorningBrief {
       postTour: ordered.filter((card) => card.showingState === 'OUTCOME_UNKNOWN').length,
       contactGaps: ordered.filter((card) => card.internalCode === 'needs_contact').length,
     },
-    sections: morningSections(ordered),
+    sections: morningSections(ordered, at),
     capabilities: integrationCapabilities(),
     friday: fridayReport(db, at),
     clock: { ...easternClock(at), source: clock.source, zone: clock.zone, instant: at.toISOString() },

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,7 +8,7 @@ import { buildMorningBrief } from '../src/execution/brief.ts';
 import { HOT7_FIXTURE_INSTANT, productionClock } from '../src/execution/clock.ts';
 import { seedHot7 } from '../src/execution/hot7.ts';
 import { applyManualMark } from '../src/execution/marks.ts';
-import { planDesk, type DeskEvidence, type DeskFact } from '../src/execution/plan.ts';
+import { easternDateKey, morningSections, planDesk, type DeskEvidence, type DeskFact } from '../src/execution/plan.ts';
 import { SHOWING_STATES } from '../src/execution/showing.ts';
 import { importLiveMaster } from '../src/ingest/liveMaster.ts';
 import { openDatabase } from '../src/db.ts';
@@ -189,10 +189,280 @@ test('synthetic live master import does not send and ranks the past tour', () =>
   const ava = brief.cards.find((card) => card.clientName === 'Ava Fixture');
   assert.equal(ava?.showingState, 'OUTCOME_UNKNOWN');
   assert.match(ava?.humanAction ?? '', /POST TOUR VERIFICATION NEEDED/);
+  assert.equal(ava?.propertyAddress, '90 Sample St #308, Miami, FL');
+  assert.equal(ava?.clientStage, 'TOURING');
+  assert.equal(ava?.showingConflict, null);
   assert.equal(ava?.live, false);
   const noah = brief.cards.find((card) => card.clientName === 'Noah Fixture');
   assert.match(noah?.humanAction ?? '', /GET NOAH FIXTURE'S CELL/);
   assert.match(`${noah?.whyNow} ${noah?.agentToolsNote}`, /not verified CASH/);
   assert.equal(Number(db.get(`SELECT COUNT(*) AS n FROM sent_messages`)?.n), 0);
+  db.close();
+});
+
+test('the active property is the latest tour, not the first discussed address', () => {
+  const db = tempDb();
+  const dir = mkdtempSync(join(tmpdir(), 'kyleos-live-'));
+  const file = join(dir, 'master.json');
+  writeFileSync(file, JSON.stringify({
+    synthetic: true,
+    leads: [{
+      lead_id: 'echo-property',
+      full_name: 'Echo Fixture',
+      phone: '(305) 555-0142',
+      email: 'echo.property@example.com',
+      properties_discussed: [
+        { address: '11 Sample St #2207, Miami, FL', status: 'Active' },
+        { address: '90 Sample St #308, Miami', status: 'toured_or_scheduled', tour_id: 'tour-fixture-308' },
+      ],
+      appointments: [
+        { date: '2026-09-20', time: '4:00 PM', status: 'scheduled', tour_id: 'tour-fixture-older', attending_agent: 'DATA NEEDED' },
+        { date: '2026-09-27', time: '6:00 PM', status: 'scheduled_or_completed_Needs Verification', tour_id: 'tour-fixture-308', attending_agent: 'Larry Dix', type: 'tour' },
+      ],
+    }, {
+      lead_id: 'two-properties',
+      full_name: 'Two Property Fixture',
+      phone: '(305) 555-0144',
+      email: 'two.property@example.com',
+      properties_discussed: [
+        { address: '1 First St', status: 'Active' },
+        { address: '2 Second St', status: 'Active' },
+      ],
+      appointments: [],
+    }],
+  }));
+  const loaded = importLiveMaster(db, file, NOW);
+  assert.equal(loaded.sent, false);
+  const card = buildMorningBrief(db, NOW).cards.find((item) => item.clientName === 'Echo Fixture');
+  assert.equal(card?.propertyAddress, '90 Sample St #308, Miami');
+  assert.match(card?.clientDraft ?? '', /did you end up seeing 90 Sample St #308/);
+  assert.equal(card?.showingLabel, 'POST TOUR VERIFICATION NEEDED');
+  assert.doesNotMatch(`${card?.propertyAddress} ${card?.clientDraft}`, /11 Sample St/);
+  assert.equal(card?.clientStage, 'TOURING');
+  assert.match(card?.showingConflict ?? '', /SHOWING CONFLICT: 9\/20 and 9\/27/);
+  const several = buildMorningBrief(db, NOW).cards.find((item) => item.clientName === 'Two Property Fixture');
+  assert.equal(several?.propertyAddress, null);
+  assert.match(several?.whyNow ?? '', /first one was not chosen/);
+  assert.doesNotMatch(several?.clientDraft ?? '', /1 First St/);
+  db.close();
+});
+
+test('the same calendar day written two ways is not a showing conflict', () => {
+  const same = planDesk(evidence('Same Day', [
+    verified('scheduled_tour_note', 'Scheduled tour 2026-09-27 6:00 PM with Larry Dix. Outcome not confirmed.'),
+    verified('showing_detail_1', 'date=2026-09-27; time=6:00 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED'),
+    verified('showing_detail_slash', 'date=9/27; time=6 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED'),
+    verified('property_address', '90 Sample St #308'),
+  ]));
+  assert.equal(same.showingConflict, null);
+  assert.doesNotMatch(same.whyNow, /SHOWING CONFLICT/);
+  const different = planDesk(evidence('Two Days', [
+    verified('showing_detail_a', 'date=9/20; time=4 PM; agent=DATA NEEDED; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED'),
+    verified('showing_detail_b', 'date=2026-09-27; time=6:00 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED'),
+  ]));
+  assert.match(different.showingConflict ?? '', /SHOWING CONFLICT: 9\/20 and 9\/27/);
+  const times = planDesk(evidence('Two Times', [
+    verified('showing_detail_a', 'date=2026-09-27; time=4:00 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED'),
+    verified('showing_detail_b', 'date=9/27; time=6:00 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED'),
+  ]));
+  assert.match(times.showingConflict ?? '', /4 PM/);
+  assert.match(times.showingConflict ?? '', /6 PM/);
+});
+
+test('needs verification is not a touring agent outcome', () => {
+  const db = tempDb();
+  const dir = mkdtempSync(join(tmpdir(), 'kyleos-live-'));
+  const file = join(dir, 'master.json');
+  writeFileSync(file, JSON.stringify({
+    synthetic: true,
+    leads: [{
+      lead_id: 'needs-verify',
+      full_name: 'Verify Fixture',
+      phone: '(305) 555-0145',
+      email: 'verify.fixture@example.com',
+      properties_discussed: [
+        { address: '11 Sample St #2207, Miami, FL', status: 'Active' },
+        { address: '90 Sample St #308, Miami', status: 'toured_or_scheduled', tour_id: 'tour-fixture-308' },
+      ],
+      appointments: [{
+        date: '2026-09-27',
+        time: '6:00 PM',
+        status: 'scheduled_or_completed_Needs Verification',
+        tour_id: 'tour-fixture-308',
+        attending_agent: 'Larry Dix',
+        tour_outcome: '',
+        type: 'tour',
+      }],
+    }],
+  }));
+  const loaded = importLiveMaster(db, file, NOW);
+  assert.equal(loaded.sent, false);
+  const card = buildMorningBrief(db, NOW).cards.find((item) => item.clientName === 'Verify Fixture');
+  assert.ok(card);
+  assert.equal(card.propertyAddress, '90 Sample St #308, Miami');
+  assert.equal(card.showingState, 'OUTCOME_UNKNOWN');
+  assert.equal(card.showingLabel, 'POST TOUR VERIFICATION NEEDED');
+  assert.notEqual(card.internalCode, 'property_pivot');
+  assert.match(card.clientDraft ?? '', /did you end up seeing 90 Sample St #308, Miami/);
+  assert.doesNotMatch(card.clientDraft ?? '', /touring agent reported/);
+  assert.equal(card.live, false);
+  db.close();
+});
+
+test('a touring agent completion is a third party pivot, not an attendance question', () => {
+  const db = tempDb();
+  const dir = mkdtempSync(join(tmpdir(), 'kyleos-live-'));
+  const file = join(dir, 'master.json');
+  writeFileSync(file, JSON.stringify({
+    synthetic: true,
+    leads: [{
+      lead_id: 'claudia-report',
+      full_name: 'Claudia Fixture',
+      phone: '(305) 555-0143',
+      email: 'claudia.report@example.com',
+      properties_discussed: [
+        { address: '7207 Sample Dr #11, Miami Beach, FL', status: 'Active', tour_outcome: 'eliminated — CASH-ONLY' },
+      ],
+      appointments: [{
+        date: '2026-09-28',
+        time: '5:30 PM',
+        status: 'completed',
+        attending_agent: 'German Capodiferro',
+        tour_outcome: 'Single Home — eliminated by client due to CASH-ONLY',
+        follow_up_from_touring_agent: 'Send more homes',
+        type: 'tour',
+      }],
+    }],
+  }));
+  const loaded = importLiveMaster(db, file, NOW);
+  assert.equal(loaded.liveSend, false);
+  assert.equal(loaded.sent, false);
+  const card = buildMorningBrief(db, NOW).cards.find((item) => item.clientName === 'Claudia Fixture');
+  assert.ok(card);
+  assert.equal(card.showingState, 'OUTCOME_UNKNOWN');
+  assert.notEqual(card.showingState, 'SHOWING_COMPLETED');
+  assert.equal(card.showingLabel, 'THIRD PARTY REPORTED');
+  assert.equal(card.clientStage, 'TOURING');
+  assert.match(card.clientDraft ?? '', /passed on 7207 Sample Dr #11/);
+  assert.match(card.clientDraft ?? '', /cash only/);
+  assert.match(card.clientDraft ?? '', /financing/);
+  assert.doesNotMatch(card.clientDraft ?? '', /did you end up seeing/);
+  assert.equal(screenKyleVoice(card.clientDraft ?? '').allowed, true);
+  assert.doesNotMatch(`${card.clientDraft} ${card.whyNow} ${card.agentToolsNote}`, /[—–]/);
+  assert.match(card.whyNow, /third party/i);
+  assert.match(card.showingLines.join('\n'), /THIRD PARTY REPORTED/);
+  assert.equal(card.live, false);
+  db.close();
+});
+
+test('a file with no tour stays NEW_INQUIRY', () => {
+  const card = planDesk(evidence('New Buyer', [verified('property_address', '10 Sample St')]));
+  assert.equal(card.clientStage, 'NEW_INQUIRY');
+});
+
+test('showings today is the clock date and later tours are upcoming', () => {
+  const today = planDesk(evidence('Today Buyer', [
+    verified('scheduled_tour_note', 'Scheduled tour 2026-09-29 6:00 PM with Kyle Kleinman'),
+    verified('property_address', '10 Today St'),
+  ]));
+  const later = planDesk(evidence('Later Tour', [
+    verified('scheduled_tour_note', 'Scheduled tour 2026-10-05 6:00 PM with Kyle Kleinman'),
+    verified('property_address', '10 Later St'),
+  ]));
+  const past = planDesk(evidence('Past Tour', [
+    verified('scheduled_tour_note', 'Scheduled tour 2026-09-20 4:00 PM with Larry Dix'),
+    verified('property_address', '10 Past St'),
+  ]));
+  assert.equal(today.showingState, 'SHOWING_SCHEDULED');
+  assert.equal(later.showingState, 'SHOWING_SCHEDULED');
+  assert.equal(past.showingState, 'OUTCOME_UNKNOWN');
+  assert.equal(easternDateKey(NOW), '2026-09-29');
+  const sections = morningSections([today, later, past], NOW);
+  const names = (label: string) => sections.header.find((bucket) => bucket.label === label)?.links.map((link) => link.name);
+  assert.deepEqual(names('Showings today'), ['Today Buyer']);
+  assert.deepEqual(names('Upcoming showings'), ['Later Tour']);
+  assert.deepEqual(sections.summary.find((bucket) => bucket.label === 'SHOWINGS TODAY')?.links.map((link) => link.name), ['Today Buyer']);
+  assert.deepEqual(sections.summary.find((bucket) => bucket.label === 'UPCOMING SHOWINGS')?.links.map((link) => link.name), ['Later Tour']);
+});
+
+test('tier 0 ranks above a higher score in tier 2', () => {
+  const db = tempDb();
+  ingestCanonicalLead(db, {
+    idempotencyKey: 'tier-low',
+    source: 'test',
+    rawText: 'Future tour fixture.',
+    now: NOW,
+    displayName: 'Low Score Tier Zero',
+    phone: '(305) 555-0161',
+    email: 'low.tier@example.com',
+    isDemo: true,
+    facts: [
+      { fieldKey: 'scheduled_tour_note', value: 'Scheduled tour 2026-10-05 6:00 PM with Kyle Kleinman', kind: 'fact', verification: 'verified', source: 'test' },
+      { fieldKey: 'property_address', value: '10 Later St', kind: 'fact', verification: 'verified', source: 'test' },
+    ],
+  });
+  ingestCanonicalLead(db, {
+    idempotencyKey: 'tier-high',
+    source: 'test',
+    rawText: 'Saved search fixture.',
+    now: NOW,
+    displayName: 'High Score Tier Two',
+    phone: '(305) 555-0162',
+    email: 'high.tier@example.com',
+    isDemo: true,
+    facts: [
+      { fieldKey: 'saved_search', value: 'Miami house', kind: 'fact', verification: 'verified', source: 'test' },
+      { fieldKey: 'hot_score', value: '400', kind: 'fact', verification: 'verified', source: 'test' },
+    ],
+  });
+  const brief = buildMorningBrief(db, NOW);
+  const low = brief.cards.find((card) => card.clientName === 'Low Score Tier Zero');
+  const high = brief.cards.find((card) => card.clientName === 'High Score Tier Two');
+  assert.equal(low?.tier, 0);
+  assert.equal(high?.tier, 2);
+  assert.ok((low?.priority ?? 99) < (high?.priority ?? 0));
+  assert.ok(brief.cards.findIndex((card) => card.clientName === 'Low Score Tier Zero') < brief.cards.findIndex((card) => card.clientName === 'High Score Tier Two'));
+  ingestCanonicalLead(db, {
+    idempotencyKey: 'tie-zed',
+    source: 'test',
+    rawText: 'Tied past tour.',
+    now: NOW,
+    displayName: 'Zed Tie',
+    phone: '(305) 555-0163',
+    email: 'zed.tie@example.com',
+    isDemo: true,
+    facts: [
+      { fieldKey: 'scheduled_tour_note', value: 'Scheduled tour 2026-09-20 4:00 PM with Larry Dix', kind: 'fact', verification: 'verified', source: 'test' },
+      { fieldKey: 'property_address', value: '10 Zed St', kind: 'fact', verification: 'verified', source: 'test' },
+    ],
+  });
+  ingestCanonicalLead(db, {
+    idempotencyKey: 'tie-amy',
+    source: 'test',
+    rawText: 'Tied past tour.',
+    now: NOW,
+    displayName: 'Amy Tie',
+    phone: '(305) 555-0164',
+    email: 'amy.tie@example.com',
+    isDemo: true,
+    facts: [
+      { fieldKey: 'scheduled_tour_note', value: 'Scheduled tour 2026-09-20 4:00 PM with Larry Dix', kind: 'fact', verification: 'verified', source: 'test' },
+      { fieldKey: 'property_address', value: '10 Amy St', kind: 'fact', verification: 'verified', source: 'test' },
+    ],
+  });
+  const tied = buildMorningBrief(db, NOW);
+  assert.ok(tied.cards.findIndex((card) => card.clientName === 'Amy Tie') < tied.cards.findIndex((card) => card.clientName === 'Zed Tie'));
+  const hotDb = tempDb();
+  const hot7 = seedHot7(hotDb, NOW);
+  assert.deepEqual(hot7.cards.map((card) => card.clientName), [
+    'Echo Niu',
+    'Erena & Rick Valle',
+    'Claudia Pinheiro',
+    'Katherine De Armas',
+    'Alberto Alonso',
+    'Mark Maccagno',
+    'Perry Crawford',
+  ]);
+  hotDb.close();
   db.close();
 });

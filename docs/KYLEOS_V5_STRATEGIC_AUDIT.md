@@ -125,7 +125,7 @@ The same desk, trusted in the hour before a showing and the hour after. Producti
 
 - The consult app in `backend/` and `mobile/`, the unused Supabase migration, and `mail.php` are not the lead desk.
 - The buyer-ledger runtime can simulate a send. It is not the morning path. Leaving it in place is safer than rewriting it this round.
-- Numeric hot scores and a second priority index on the card. Tier is now visible. The old score still sorts, because changing the sort would reshuffle the Hot 7 fixture for no client benefit.
+- Numeric hot scores and a second priority index on the card. Tier is the primary sort. Inside a tier the old score still breaks ties. A matching hot score then falls through to the client name, so equal cards do not reshuffle on the next import. Hot 7 order did not change, because its tier 0 cards were already ahead of its tier 2 cards.
 
 ## Underdeveloped
 
@@ -212,7 +212,7 @@ A true record of Miami-Dade and Broward clients: what they said, what was verifi
 
 **A. Extension.** Waiting, promises, execution marks, tier and adapter fields, prompt registry, lead-master reader, `redfin_customer_id` as an identifier that flags a collision instead of merging.
 
-**B. Refactor.** Clock source is explicit. Showing codes gained a human label. Future scheduled tours use `SHOWING_SCHEDULED` instead of being called access-pending. The rank sort is the same score.
+**B. Refactor.** Clock source is explicit. Showing codes gained a human label. Future scheduled tours use `SHOWING_SCHEDULED` instead of being called access-pending. Tier is the primary rank key. The existing score breaks ties inside a tier.
 
 **C. Migration.** None in this branch. The ledger file and the consult app stay where they are. A later migration would need the problem (two opportunity tables), the evidence, the target file, a copy plan, a compatibility window, a risk note, tests, and a rollback. That bar is not met by a morning-brief change.
 

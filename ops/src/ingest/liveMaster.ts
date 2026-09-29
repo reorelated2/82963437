@@ -135,39 +135,55 @@ function factsFor(lead: Record<string, unknown>): FactInput[] {
     if (!value) return;
     facts.push({
       fieldKey,
-      value: value.slice(0, 500),
+      value: plain(value).slice(0, 500),
       kind,
       verification: kind === 'inference' ? 'unverified' : verification,
       source: 'live_master',
     });
   };
-  const properties = Array.isArray(lead.properties_discussed) ? lead.properties_discussed : [];
-  const firstProperty = properties.find((item) => item && typeof item === 'object') as Record<string, unknown> | undefined;
-  const address = clean(stringOf(firstProperty?.address)) || clean(stringOf(lead.current_property_address));
+  const properties = objectList(lead.properties_discussed);
+  const appointments = objectList(lead.appointments)
+    .filter((appt) => clean(stringOf(appt.date)))
+    .sort((left, right) => tourSortKey(left) - tourSortKey(right));
+  const active = selectActiveProperty(properties, appointments, lead);
+  const address = clean(stringOf(active?.address));
   push('property_address', address);
-  const status = clean(stringOf(firstProperty?.status));
+  const status = clean(stringOf(active?.status));
   if (status && /^(active|pending|sold|off market)$/i.test(status)) push('property_status', status);
-  const url = stringOf(firstProperty?.redfin_url);
+  const url = stringOf(active?.redfin_url);
   if (url && /^https:\/\//i.test(url)) push('redfin_url', url);
-  const appointments = Array.isArray(lead.appointments) ? lead.appointments : [];
-  appointments.forEach((item, index) => {
-    if (!item || typeof item !== 'object') return;
-    const appt = item as Record<string, unknown>;
+  if (!address) {
+    const choices = properties.map((item) => clean(stringOf(item.address))).filter((item): item is string => Boolean(item));
+    if (choices.length > 1) push('property_options', choices.join(' | '));
+  }
+  appointments.forEach((appt, index) => {
     const date = clean(stringOf(appt.date));
     if (!date) return;
     const time = clean(stringOf(appt.time)) || 'DATA NEEDED';
     const agent = clean(stringOf(appt.attending_agent)) || 'DATA NEEDED';
-    const cancelled = /cancel/i.test(`${stringOf(appt.status)} ${stringOf(appt.cancellation_reason)}`);
+    const cancelled = /cancel/i.test(`${stringOf(appt.status) ?? ''} ${stringOf(appt.cancellation_reason) ?? ''}`);
+    const report = tourReport(appt, propertyForAppointment(appt, properties) ?? address);
     const note = cancelled
       ? `Scheduled tour ${date} ${time} cancelled. Agent ${agent}.`
-      : `Scheduled tour ${date} ${time} with ${agent}. Outcome not confirmed.`;
+      : `Scheduled tour ${date} ${time} with ${agent}. ${report ? 'A touring agent reported an outcome.' : 'Outcome not confirmed.'}`;
     push(index === 0 ? 'scheduled_tour_note' : `scheduled_tour_note_${index + 1}`, note, 'fact', 'verified');
+    const outcome = cancelled ? 'SHOWING CANCELLED' : report?.outcomeLabel ?? 'OUTCOME NOT CONFIRMED';
+    const place = propertyForAppointment(appt, properties);
     push(
       `showing_detail_${index + 1}`,
-      `date=${date}; time=${time}; agent=${agent}; outcome=${cancelled ? 'SHOWING CANCELLED' : 'OUTCOME NOT CONFIRMED'}; class=THIRD PARTY REPORTED`,
+      `date=${date}; time=${time}; agent=${agent}; outcome=${outcome}; class=THIRD PARTY REPORTED${place ? `; address=${place}` : ''}`,
     );
-    if (address) push('showing_address', address, 'inference');
   });
+  const latest = appointments[appointments.length - 1];
+  if (latest) {
+    const report = tourReport(latest, propertyForAppointment(latest, properties) ?? address);
+    if (report) {
+      push(
+        'third_party_tour_report',
+        `property=${report.property ?? ''}; agent=${report.agent}; outcome=${report.outcomeLabel}; cash_only=${report.cashOnly ? 'yes' : 'no'}; passed=${report.passed ? 'yes' : 'no'}; class=THIRD PARTY REPORTED`,
+      );
+    }
+  }
   const cash = stringOf(lead.cash_status) ?? '';
   if (/cash buyer/i.test(cash) && !/not cash/i.test(cash)) {
     push('cash_vs_finance', 'cash', 'inference');
@@ -188,6 +204,85 @@ function factsFor(lead: Record<string, unknown>): FactInput[] {
     push('unsent_draft', 'Unsent draft on file. It was not sent.', 'inference');
   }
   return facts;
+}
+
+function objectList(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+}
+
+function selectActiveProperty(
+  properties: Record<string, unknown>[],
+  appointments: Record<string, unknown>[],
+  lead: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const newestFirst = [...appointments].sort((left, right) => tourSortKey(right) - tourSortKey(left));
+  for (const appt of newestFirst) {
+    const match = propertyForAppointment(appt, properties);
+    if (match) {
+      return properties.find((item) => clean(stringOf(item.address)) === match) ?? { address: match };
+    }
+  }
+  const withAddress = properties.filter((item) => clean(stringOf(item.address)));
+  if (newestFirst.length > 0 && withAddress.length === 1) return withAddress[0] ?? null;
+  if (newestFirst.length > 0) {
+    const toured = withAddress.filter((item) => /tour/i.test(stringOf(item.status) ?? ''));
+    if (toured.length === 1) return toured[0] ?? null;
+  }
+  if (newestFirst.length === 0 && withAddress.length === 1) return withAddress[0] ?? null;
+  const current = clean(stringOf(lead.current_property_address));
+  if (!newestFirst.length && current) return { address: current };
+  return null;
+}
+
+function propertyForAppointment(appt: Record<string, unknown>, properties: Record<string, unknown>[]): string | null {
+  const id = stringOf(appt.tour_id);
+  if (!id) return null;
+  const match = properties.find((item) => stringOf(item.tour_id) === id);
+  return clean(stringOf(match?.address));
+}
+
+function tourReport(appt: Record<string, unknown>, property: string | null): { property: string | null; agent: string; outcomeLabel: string; cashOnly: boolean; passed: boolean } | null {
+  const status = stringOf(appt.status) ?? '';
+  const outcomeText = clean(stringOf(appt.tour_outcome));
+  const outcome = `${outcomeText ?? ''} ${stringOf(appt.follow_up_from_touring_agent) ?? ''}`;
+  const cancelled = /cancel/i.test(`${status} ${stringOf(appt.cancellation_reason) ?? ''}`);
+  const needsVerification = /needs?\s*verification/i.test(status);
+  const explicitlyCompleted = /\bcompleted\b/i.test(status.replace(/_/g, ' ')) && !needsVerification && !cancelled;
+  // "scheduled_or_completed_Needs Verification" contains the word completed and is still unverified.
+  if (!explicitlyCompleted && !outcomeText) return null;
+  const cashOnly = /cash[\s-]*only/i.test(outcome);
+  const passed = cashOnly || /eliminat|passed|did not like/i.test(outcome);
+  const outcomeLabel = cashOnly ? 'PASSED, CASH ONLY' : passed ? 'PASSED' : 'REPORTED BY TOURING AGENT';
+  return {
+    property,
+    agent: clean(stringOf(appt.attending_agent)) || 'DATA NEEDED',
+    outcomeLabel,
+    cashOnly,
+    passed,
+  };
+}
+
+function tourSortKey(appt: Record<string, unknown>): number {
+  const date = stringOf(appt.date) ?? '';
+  const iso = date.match(/20\d{2}-\d{2}-\d{2}/)?.[0] ?? '0000-00-00';
+  const time = stringOf(appt.time) ?? '';
+  const match = time.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  let minutes = 0;
+  if (match?.[1]) {
+    let hour = Number(match[1]);
+    const minute = Number(match[2] ?? 0);
+    const mer = (match[3] ?? '').toLowerCase();
+    if (mer === 'pm' && hour < 12) hour += 12;
+    if (mer === 'am' && hour === 12) hour = 0;
+    minutes = hour * 60 + minute;
+  }
+  const day = Date.parse(`${iso}T00:00:00.000Z`);
+  return (Number.isNaN(day) ? 0 : day) + minutes * 60_000;
+}
+
+function plain(value: string): string {
+  return value.replace(/[—–]/g, ',').replace(/\s+/g, ' ').trim();
 }
 
 function usablePhone(value: string | null): string | null {

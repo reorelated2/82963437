@@ -14,10 +14,11 @@
       "cash_status": "Unknown",
       "consent_or_communication_status": "Unknown",
       "properties_discussed": [
-        { "address": "10 Sample St #1, Miami, FL", "status": "Active", "redfin_url": "https://www.redfin.com/sample-listing" }
+        { "address": "11 Sample St #2207, Miami, FL", "status": "Active" },
+        { "address": "90 Sample St #308, Miami, FL", "status": "toured_or_scheduled", "tour_id": "tour-fixture-308", "redfin_url": "https://www.redfin.com/sample-listing" }
       ],
       "appointments": [
-        { "date": "2026-09-27", "time": "6:00 PM", "status": "scheduled", "attending_agent": "Larry Dix" }
+        { "date": "2026-09-27", "time": "6:00 PM", "status": "scheduled", "attending_agent": "Larry Dix", "tour_id": "tour-fixture-308", "type": "tour" }
       ],
       "recommended_drafts": ["do not treat this string as sent"]
     },
