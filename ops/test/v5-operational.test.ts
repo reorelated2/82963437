@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { ingestCanonicalLead, writeClientFact } from '../src/canonical.ts';
 import { openBuyerFile } from '../src/conversion/engine.ts';
 import { buildMorningBrief, markManual, prepareExecution, productionClock } from '../src/conversion/execution.ts';
 import { openDatabase } from '../src/db.ts';
+import { loadAgentToolsDataset, readAgentToolsDataset } from '../src/ingest/agentTools.ts';
 import { text } from '../src/sql.ts';
 
 const NOW = new Date('2026-09-29T07:50:00.000Z');
@@ -45,6 +47,22 @@ test('the production brief uses the real clock, not the Hot 7 freeze', () => {
   assert.doesNotMatch(brief.text, /3:50 AM/);
   assert.equal(brief.cards.length, 0);
   assert.match(brief.text, /Actionable clients: 0/);
+  db.close();
+});
+
+test('a past tour stays T0 after its morning due time', () => {
+  const db = tempDb();
+  const morning = new Date('2026-09-29T07:50:00.000Z');
+  const afternoon = new Date('2026-09-29T18:05:00.000Z');
+  const dataset = readAgentToolsDataset(fileURLToPath(new URL('../fixtures/hot7-2026-09-29.json', import.meta.url)));
+  loadAgentToolsDataset(db, dataset, { apply: true, now: morning });
+  const brief = buildMorningBrief(db, afternoon, 'production');
+  const echo = brief.cards[0];
+  assert.equal(echo?.client_name, 'Echo Niu');
+  assert.equal(echo?.priority_tier, 'T0');
+  assert.equal(echo?.internal_action_type, 'tour_follow_up');
+  assert.ok(echo?.summary_buckets.includes('overdue'));
+  assert.ok(echo?.summary_buckets.includes('post_tour'));
   db.close();
 });
 

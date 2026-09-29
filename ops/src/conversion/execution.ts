@@ -2044,7 +2044,6 @@ function outcomeFollowUp(loaded: Loaded, last: ManualMark, now: Date): Choice | 
 function tierFor(action: ExecutionAction, tour: TourView, now: Date): 'T0' | 'T1' | 'T2' | 'T3' {
   if (action.human_headline.startsWith('DO NOT')) return 'T3';
   if (action.waiting_on === 'CLIENT' && !action.summary_buckets.includes('overdue')) return 'T3';
-  if (action.summary_buckets.includes('overdue')) return 'T1';
   if (action.waiting_on === 'KYLE' || action.promise) return 'T0';
   if (action.human_headline.startsWith('WAIT')) return 'T3';
   if (action.summary_buckets.includes('post_tour') || action.internal_action_type === 'tour_follow_up') return 'T0';
@@ -2052,6 +2051,7 @@ function tierFor(action: ExecutionAction, tour: TourView, now: Date): 'T0' | 'T1
   if (action.action_channel === 'call' && action.human_headline.startsWith('CALL')) return 'T0';
   if (action.summary_buckets.includes('offers') && action.verified_phone) return 'T0';
   if (action.summary_buckets.includes('under_contract')) return 'T0';
+  if (action.summary_buckets.includes('overdue')) return 'T1';
   if (tour.scheduled && !tour.past) {
     const instant = tour.rawWhen ? appointmentInstant(tour.rawWhen, now) : null;
     if (instant && instant.getTime() - now.getTime() <= 48 * 60 * 60 * 1000) return 'T1';
