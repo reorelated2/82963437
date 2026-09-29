@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Kyle's Real Estate Operating Agent",
+  "version": "2.1.0",
+  "description": "One trained Miami real estate assistant beside Kyle. Reads the visible page, classifies it, drafts the next move, flags risk. Approval-gated prefill. Never sends.",
+  "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://www.redfin.com/tools/*",
+    "https://mail.google.com/*",
+    "https://*.followupboss.com/*",
+    "https://followupboss.com/*",
+    "https://api.anthropic.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Open Operating Agent" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.redfin.com/tools/*",
+        "https://mail.google.com/*",
+        "https://*.followupboss.com/*",
+        "https://followupboss.com/*"
+      ],
+      "js": ["reader.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

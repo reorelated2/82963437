@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Operating Agent</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header>
+  <div class="lg">KK</div>
+  <div><b>Real Estate Operating Agent</b><div class="sub">Miami · Agent Tools, Gmail, Follow Up Boss · approval gated</div></div>
+  <button id="settingsBtn" class="ghost" title="API key">⚙</button>
+</header>
+
+<nav id="modes">
+  <button data-mode="auto" class="on">Auto</button>
+  <button data-mode="lead">Lead</button>
+  <button data-mode="capture">Capture</button>
+  <button data-mode="mls">MLS</button>
+  <button data-mode="cma">CMA</button>
+  <button data-mode="onehome">OneHome</button>
+  <button data-mode="contract">Contract</button>
+</nav>
+
+<div id="status" class="s-idle"><span class="dot"></span><span>Idle</span></div>
+<div id="safe">🔒 Draft, guide, prefill, recommend only. No submit, send, sign, complete, dismiss, or save without Kyle's approval. Redfin internal email is hard-blocked.</div>
+
+<div id="settings" class="hidden">
+  <label>Anthropic API key (for MLS / CMA / OneHome / Contract analysis)</label>
+  <div class="row"><input id="apiKey" type="password" placeholder="sk-ant-..."><button id="saveKey">Save</button></div>
+  <p class="hint">Stored in this browser's extension storage only. Sent only to api.anthropic.com. Lead, Capture, Gmail, and Follow Up Boss never use it.</p>
+</div>
+
+<div id="pasteWrap" class="hidden">
+  <label id="pasteLabel">Paste page text</label>
+  <textarea id="paste" placeholder="Select all on the MLS / OneHome / contract page, copy, paste here."></textarea>
+  <button id="runPaste" class="pri">Run analysis</button>
+</div>
+
+<main id="body">
+  <div class="card"><div class="bd empty">Open an Agent Tools, Gmail, or Follow Up Boss page and click Analyze, or pick a mode.</div></div>
+</main>
+
+<footer><button id="analyze" class="pri">Analyze / Refresh</button></footer>
+<div id="toast"></div>
+<script src="brains.js"></script>
+<script src="sidepanel.js"></script>
+</body>
+</html>
