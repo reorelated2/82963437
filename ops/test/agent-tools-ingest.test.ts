@@ -93,6 +93,8 @@ test('the sample fixture keeps every record and does not merge on a name', () =>
   assert.equal(text(opp, 'primary_stage'), 'NEW_INQUIRY');
   assert.equal(text(opp, 'financing_state'), 'UNKNOWN');
   assert.equal(text(opp, 'search_state'), 'NOT_STARTED');
+  const laneSearch = db.get(`SELECT state FROM readiness_flags WHERE opportunity_id = ? AND flag = 'search'`, lane?.opportunityId);
+  assert.equal(text(laneSearch, 'state'), 'unknown');
   assert.equal(text(opp, 'follow_up_trigger'), 'intake_answer');
   assert.equal(text(opp, 'source_label'), 'redfin_agent_tools');
   const budget = db.get(
@@ -208,6 +210,41 @@ test('household evidence does not merge two verified phones', () => {
   assert.equal(count(db, 'clients'), 2);
   const flag = db.get(`SELECT reason FROM identity_flags WHERE reason LIKE 'Household id%'`);
   assert.match(text(flag, 'reason'), /Nothing was merged/);
+  db.close();
+});
+
+test('verified search criteria mark search ready and do not confirm a tour', () => {
+  const db = tempDb();
+  const loaded = loadAgentToolsDataset(db, envelope([{
+    record_id: 'fixture-search-006',
+    disposition: 'lead',
+    source: { system: 'redfin_agent_tools', source_id: 'at-fixture-search', exported_at: NOW.toISOString() },
+    person: {
+      display_name: 'Fixture Search',
+      phones: [{ value: '(305) 555-0108', verification: 'verified' }],
+      emails: [{ value: 'fixture.search@example.com', verification: 'verified' }],
+    },
+    facts: [
+      { field: 'search_state', value: 'CRITERIA_PARTIAL', kind: 'fact', verification: 'verified' },
+      { field: 'tours_completed', value: '0', kind: 'fact', verification: 'verified' },
+      { field: 'area', value: 'Miami', kind: 'fact', verification: 'verified' },
+    ],
+    dedup_candidates: [],
+  }]), { apply: true, now: NOW });
+  const opportunityId = loaded.results[0]?.opportunityId;
+  const opp = db.get(`SELECT primary_stage, search_state, financing_state FROM opportunities WHERE id = ?`, opportunityId);
+  assert.equal(text(opp, 'primary_stage'), 'NEW_INQUIRY');
+  assert.equal(text(opp, 'search_state'), 'CRITERIA_PARTIAL');
+  assert.equal(text(opp, 'financing_state'), 'UNKNOWN');
+  const search = db.get(`SELECT state, evidence FROM readiness_flags WHERE opportunity_id = ? AND flag = 'search'`, opportunityId);
+  assert.equal(text(search, 'state'), 'ready');
+  assert.match(text(search, 'evidence'), /not a confirmed tour/);
+  const tour = db.get(`SELECT state FROM readiness_flags WHERE opportunity_id = ? AND flag = 'tour'`, opportunityId);
+  assert.equal(text(tour, 'state'), 'unknown');
+  const areaAnswer = db.get(`SELECT field_key FROM intake_answers WHERE opportunity_id = ? AND field_key = 'area'`, opportunityId);
+  assert.equal(areaAnswer, undefined);
+  const provenance = db.get(`SELECT payload_json FROM events WHERE idempotency_key = ?`, 'agent-tools:fixture-search-006:provenance');
+  assert.match(text(provenance, 'payload_json'), new RegExp(loaded.results[0]?.clientId ?? 'missing'));
   db.close();
 });
 

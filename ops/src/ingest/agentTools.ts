@@ -212,7 +212,6 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
     return finishHeld(db, dataset, record, held, status === 'pending_enrichment' ? 'pending_enrichment' : 'needs_review', now);
   }
 
-  const matched = sourceClients[0] ?? phoneClient ?? emailClient;
   const ingested = ingestCanonicalLead(db, {
     idempotencyKey: key,
     source: SOURCE,
@@ -308,7 +307,7 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
       source_id: record.source.source_id,
       record_id: record.record_id,
       exported_at: record.source.exported_at,
-      matchedClientId: matched,
+      matchedClientId: ingested.clientId,
       live: false,
       writtenToAgentTools: false,
     },
@@ -508,6 +507,17 @@ function applyVerifiedState(db: SqlDb, opportunityId: string, facts: FactInput[]
     now.toISOString(),
     opportunityId,
   );
+  if (searchState === 'CRITERIA_PARTIAL' || searchState === 'ACTIVE') {
+    db.run(
+      `INSERT INTO readiness_flags (opportunity_id, flag, state, evidence, updated_at)
+       VALUES (?, 'search', 'ready', ?, ?)
+       ON CONFLICT(opportunity_id, flag) DO UPDATE SET
+         state = excluded.state, evidence = excluded.evidence, updated_at = excluded.updated_at`,
+      opportunityId,
+      `Verified search state ${searchState}. Criteria on file are not a confirmed tour.`,
+      now.toISOString(),
+    );
+  }
 }
 
 function factualCrmNote(record: AgentToolsRecord, facts: FactInput[]): string {

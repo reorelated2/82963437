@@ -21,7 +21,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test`: **97 passed, 0 failed** on 2026-09-29 after the Agent Tools dry-run loader. The five new checks are in `ops/test/agent-tools-ingest.test.ts`.
+Typecheck passed. `npm test`: **98 passed, 0 failed** on 2026-09-29 after the Agent Tools dry-run loader. The checks are in `ops/test/agent-tools-ingest.test.ts`.
 
 The first test run, before Pillow was installed, was 51 passed and 1 failed. The failure was the screenshot fixture (`Pillow is required to draw the screenshot fixture.`). After Pillow was installed, that test passed with the rest. Pillow is an environment tool, not an `ops` dependency.
 

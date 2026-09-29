@@ -169,7 +169,7 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch after the Agent Tools loader: typecheck passed. `npm test` reported 97 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+2026-09-29 result on this branch after the Agent Tools loader: typecheck passed. `npm test` reported 98 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
 
 ## 9. Audit after `main` was merged
 
