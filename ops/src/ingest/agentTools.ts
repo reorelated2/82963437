@@ -11,6 +11,8 @@ import {
   type FactInput,
 } from '../canonical.ts';
 import { nextBestAction, openBuyerFile } from '../conversion/engine.ts';
+import { publishExecution } from '../execution/publish.ts';
+import { recordLeadSource } from '../execution/source.ts';
 import { FINANCING_STATES, PRIMARY_STAGES, SEARCH_STATES, type FinancingState, type SearchState } from '../conversion/policy.ts';
 import { sendFlags } from '../mode.ts';
 import { text, type SqlDb } from '../sql.ts';
@@ -51,6 +53,8 @@ export interface AgentToolsRecord {
     kind: 'fact' | 'inference';
     verification: 'verified' | 'unverified';
     evidence?: string;
+    observedAt?: string;
+    source?: string;
   }>;
   dedup_candidates?: Array<{ source_id?: string; display_name?: string; reason: string }>;
 }
@@ -293,6 +297,14 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
 
   openBuyerFile(db, { opportunityId: ingested.opportunityId, now });
   applyVerifiedState(db, ingested.opportunityId, facts, now);
+  recordLeadSource(db, {
+    clientId: ingested.clientId,
+    opportunityId: ingested.opportunityId,
+    sourceSystem: 'redfin_agent_tools',
+    leadSource: verifiedValue(facts, 'lead_source'),
+    sourceIdentifier: record.source.source_id,
+    now,
+  });
   const action = nextBestAction(db, ingested.opportunityId, now);
   const note = factualCrmNote(record, facts);
   recordCanonicalEvent(db, {
@@ -328,6 +340,7 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
     now,
   });
   const opp = db.get(`SELECT follow_up_trigger, primary_stage, financing_state, search_state FROM opportunities WHERE id = ?`, ingested.opportunityId);
+  publishExecution(db, { clientId: ingested.clientId, opportunityId: ingested.opportunityId, now });
   return {
     recordId: record.record_id,
     sourceId: record.source.source_id,
@@ -407,6 +420,9 @@ function finishHeld(
         writtenToAgentTools: false,
       },
     });
+    if (held.clientId && held.opportunityId) {
+      publishExecution(db, { clientId: held.clientId, opportunityId: held.opportunityId, now });
+    }
   }
   return {
     recordId: record.record_id,
@@ -546,7 +562,8 @@ function recordFacts(record: AgentToolsRecord): FactInput[] {
     value: fact.value.trim(),
     kind: fact.kind === 'inference' ? 'inference' : 'fact',
     verification: fact.verification === 'verified' ? 'verified' : 'unverified',
-    source,
+    source: fact.source?.trim() || source,
+    observedAt: fact.observedAt,
   }));
   for (const phone of record.person.phones ?? []) {
     if (phone.verification === 'inferred' && phone.value.trim()) {
@@ -645,8 +662,210 @@ function parseFacts(value: unknown): AgentToolsRecord['facts'] {
       kind: row.kind,
       verification: row.verification,
       evidence: typeof row.evidence === 'string' ? row.evidence : undefined,
+      observedAt: typeof row.observedAt === 'string' ? row.observedAt : undefined,
+      source: typeof row.source === 'string' ? row.source : undefined,
     };
   });
+}
+
+/**
+ * One staging-v0 buyer becomes one Agent Tools record and goes through
+ * loadAgentToolsDataset. This is not a second importer.
+ */
+export function loadCanonicalStagingBuyer(db: SqlDb, filePath: string, stagingId: string, options?: {
+  now?: Date;
+}): AgentToolsLoadResult {
+  const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as { meta?: { generated_at?: string }; records?: unknown[] };
+  const row = (parsed.records ?? []).find((item) => {
+    return Boolean(item && typeof item === 'object' && (item as { staging_id?: string }).staging_id === stagingId);
+  });
+  if (!row || typeof row !== 'object') {
+    return {
+      applied: false,
+      liveSend: false,
+      systemMode: sendFlags().systemMode,
+      recordCount: parsed.records?.length ?? 0,
+      results: [],
+      message: `Staging id ${stagingId} is not in that file. Nothing was written.`,
+    };
+  }
+  const pasteAt = parsed.meta?.generated_at?.trim() || new Date().toISOString();
+  const dataset = stagingRowToDataset(row as StagingBuyer, pasteAt);
+  return loadAgentToolsDataset(db, dataset, { apply: true, onlyRecordId: stagingId, now: options?.now });
+}
+
+interface StagingBuyer {
+  staging_id?: string;
+  identity?: {
+    full_name?: string;
+    phones?: Array<{ value?: string; verified?: boolean }>;
+    emails?: Array<{ value?: string; verified?: boolean }>;
+  };
+  provenance?: { sources?: Array<{ system?: string; captured_at?: string }> };
+  facts?: Array<{ field?: string; value?: unknown; source?: string; verification_status?: string }>;
+  inferences?: Array<{ field?: string; value?: unknown }>;
+  searches?: Array<{ raw_text?: string; source?: string }>;
+  mapping_issues?: string[];
+}
+
+function stagingRowToDataset(row: StagingBuyer, pasteAt: string): AgentToolsDataset {
+  const stagingId = row.staging_id?.trim() || 'staging-record';
+  const atSnapshot = latestCapture(row, 'agent_tools') ?? pasteAt;
+  const gmailSnapshot = latestCapture(row, 'gmail_redfin') ?? pasteAt;
+  const facts: NonNullable<AgentToolsRecord['facts']> = [];
+  const push = (fact: NonNullable<AgentToolsRecord['facts']>[number]) => {
+    facts.push(fact);
+  };
+  const appointments = (row.facts ?? []).filter((fact) => fact.field === 'appointment' && fact.value && typeof fact.value === 'object');
+  appointments.forEach((fact, index) => {
+    const value = fact.value as { date?: string; time?: string; attending_agent?: string };
+    const iso = typeof value.date === 'string' ? value.date : '';
+    const monthDay = iso.match(/^\d{4}-(\d{2})-(\d{2})$/);
+    const date = monthDay ? `${Number(monthDay[1])}/${Number(monthDay[2])}` : 'DATA NEEDED';
+    const time = clockLabel(typeof value.time === 'string' ? value.time : '');
+    const agent = value.attending_agent?.trim() || 'DATA NEEDED';
+    push({
+      field: `showing_detail_${index + 1}`,
+      value: `date=${date}; time=${time}; agent=${agent}; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED`,
+      kind: 'fact',
+      verification: 'unverified',
+      observedAt: gmailSnapshot,
+      source: `gmail_redfin snapshot=${gmailSnapshot}`,
+    });
+  });
+  const buying = (row.facts ?? []).find((fact) => fact.field === 'agent_tools.buying_activity' && typeof fact.value === 'string');
+  if (buying && typeof buying.value === 'string') {
+    push({
+      field: 'buying_activity',
+      value: buying.value,
+      kind: 'fact',
+      verification: 'unverified',
+      observedAt: atSnapshot,
+      source: `agent_tools snapshot=${atSnapshot}`,
+    });
+  }
+  const toured = (row.facts ?? []).find((fact) => {
+    const value = fact.value;
+    return fact.field === 'property_discussed' && Boolean(value && typeof value === 'object' && /tour/i.test(String((value as { status?: string }).status ?? '')));
+  });
+  const touredAddress = toured && toured.value && typeof toured.value === 'object' ? (toured.value as { address?: string }).address : null;
+  if (touredAddress) {
+    push({
+      field: 'property_address',
+      value: touredAddress,
+      kind: 'fact',
+      verification: 'unverified',
+      observedAt: gmailSnapshot,
+      source: `gmail_redfin snapshot=${gmailSnapshot}`,
+    });
+  }
+  const searches = (row.searches ?? []).filter((item) => /agent_tools/i.test(item.source ?? '') && item.raw_text).map((item) => item.raw_text?.trim()).filter((item): item is string => Boolean(item));
+  if (searches.length) {
+    push({
+      field: 'saved_search',
+      value: searches.join(' | '),
+      kind: 'fact',
+      verification: 'unverified',
+      observedAt: atSnapshot,
+      source: `agent_tools snapshot=${atSnapshot}`,
+    });
+  }
+  const leadSource = (row.facts ?? []).find((fact) => fact.field === 'lead_source' && typeof fact.value === 'string');
+  if (leadSource && typeof leadSource.value === 'string') {
+    push({
+      field: 'lead_source',
+      value: leadSource.value,
+      kind: 'fact',
+      verification: 'unverified',
+      observedAt: gmailSnapshot,
+      source: `gmail_redfin snapshot=${gmailSnapshot}`,
+    });
+  }
+  const laterTour = appointments.some((fact) => {
+    const value = fact.value as { date?: string };
+    const year = atSnapshot.slice(0, 4) || '2026';
+    return typeof value.date === 'string' && typeof buying?.value === 'string' && value.date > activityDay(buying.value, year);
+  });
+  const staleIssue = (row.mapping_issues ?? []).some((issue) => /stale/i.test(issue));
+  if (buying && (laterTour || staleIssue)) {
+    push({
+      field: 'agent_tools_snapshot',
+      value: `captured=${atSnapshot}; the export still describes the earlier tour as not yet held; later tour detail is on file; stale=yes`,
+      kind: 'fact',
+      verification: 'unverified',
+      observedAt: atSnapshot,
+      source: `agent_tools snapshot=${atSnapshot}`,
+    });
+  }
+  if ((row.mapping_issues ?? []).some((issue) => /unsent draft/i.test(issue) && /already happened/i.test(issue))) {
+    push({
+      field: 'sms_draft',
+      value: 'Unsent draft claims the tour already happened. That claim is not verified and the draft was not sent.',
+      kind: 'inference',
+      verification: 'unverified',
+      observedAt: pasteAt,
+      source: `staging snapshot=${pasteAt}`,
+    });
+  }
+  const score = (row.inferences ?? []).find((item) => item.field === 'lead_engine.lead_score');
+  if (score && (typeof score.value === 'number' || typeof score.value === 'string')) {
+    push({
+      field: 'hot_score',
+      value: String(score.value),
+      kind: 'inference',
+      verification: 'unverified',
+      observedAt: pasteAt,
+      source: `lead_engine snapshot=${pasteAt}`,
+    });
+  }
+  return {
+    dataset: 'redfin_agent_tools_leads',
+    mode: 'DRY_RUN',
+    exported_at: atSnapshot,
+    source_system: 'redfin_agent_tools',
+    records: [{
+      record_id: stagingId,
+      disposition: 'lead',
+      source: { system: 'redfin_agent_tools', source_id: stagingId, exported_at: atSnapshot },
+      person: {
+        display_name: row.identity?.full_name ?? null,
+        phones: contacts(row.identity?.phones),
+        emails: contacts(row.identity?.emails),
+      },
+      facts,
+    }],
+  };
+}
+
+function contacts(values: Array<{ value?: string; verified?: boolean }> | undefined): Array<{ value: string; verification: 'verified' | 'inferred' }> {
+  return (values ?? []).filter((item) => item.value?.trim()).map((item) => ({
+    value: item.value?.trim() ?? '',
+    verification: item.verified ? 'verified' : 'inferred',
+  }));
+}
+
+function latestCapture(row: StagingBuyer, system: string): string | null {
+  const found = (row.provenance?.sources ?? [])
+    .filter((source) => source.system === system && source.captured_at)
+    .map((source) => source.captured_at ?? '')
+    .sort();
+  return found.at(-1) ?? null;
+}
+
+function activityDay(value: string, year: string): string {
+  const month = value.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i);
+  const numbers: Record<string, string> = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+  if (!month?.[1] || !month[2]) return '0000-00-00';
+  return `${year}-${numbers[month[1].slice(0, 3).toLowerCase()]}-${month[2].padStart(2, '0')}`;
+}
+
+function clockLabel(raw: string): string {
+  const match = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (!match?.[1] || !match[3]) return 'DATA NEEDED';
+  const minute = match[2] ?? '00';
+  const mer = match[3].toUpperCase();
+  if (minute === '00') return `${Number(match[1])} ${mer}`;
+  return `${Number(match[1])}:${minute} ${mer}`;
 }
 
 function parseCandidates(value: unknown): AgentToolsRecord['dedup_candidates'] {

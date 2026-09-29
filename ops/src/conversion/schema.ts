@@ -173,6 +173,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS handoff_cards_once
 
 CREATE UNIQUE INDEX IF NOT EXISTS next_best_actions_one_primary
   ON next_best_actions(opportunity_id) WHERE is_primary = 1;
+
+CREATE TABLE IF NOT EXISTS lead_source_history (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  opportunity_id TEXT NOT NULL,
+  source_system TEXT NOT NULL,
+  lead_source TEXT,
+  source_identifier TEXT,
+  conflict INTEGER NOT NULL DEFAULT 0,
+  recorded_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS showing_transitions (
+  id TEXT PRIMARY KEY,
+  opportunity_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  source TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 const OPPORTUNITY_COLUMNS: Array<[string, string]> = [
@@ -188,6 +208,8 @@ const OPPORTUNITY_COLUMNS: Array<[string, string]> = [
   ['last_meaningful_contact_by', 'ALTER TABLE opportunities ADD COLUMN last_meaningful_contact_by TEXT'],
   ['contact_verification', 'ALTER TABLE opportunities ADD COLUMN contact_verification TEXT'],
   ['search_state', 'ALTER TABLE opportunities ADD COLUMN search_state TEXT'],
+  ['original_lead_source', 'ALTER TABLE opportunities ADD COLUMN original_lead_source TEXT'],
+  ['source_system', 'ALTER TABLE opportunities ADD COLUMN source_system TEXT'],
 ];
 
 const EXTRA_COLUMNS: Array<[string, string, string]> = [

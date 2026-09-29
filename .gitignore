@@ -4,6 +4,8 @@ backend/data/
 ops/data/*.sqlite
 ops/data/*.sqlite-*
 ops/data/uploads/
+agent-tools-canonical-staging*.json
+**/agent-tools-canonical-staging*.json
 ops/data/backups/
 ops/data/*.png
 *.sqlite
