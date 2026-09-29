@@ -99,11 +99,28 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       const voice = screenKyleVoice(draft);
       if (!voice.allowed) throw new Error(`${input.name}: ${voice.reason}`);
     }
+    const badDraft = input.facts.find((fact) => /sms_draft|gmail_draft|unsent_draft/.test(fact.field) && /happen|completed/i.test(fact.value));
+    if (badDraft) {
+      if (full.clientDraft && /already happened|glad you|hope you enjoyed/i.test(full.clientDraft)) {
+        full.clientDraft = `${first(input.name)}, did you end up seeing ${property ?? 'the place'}?`;
+      }
+      if (!/Do not send that draft/.test(full.agentToolsNote)) {
+        full.agentToolsNote = `${full.agentToolsNote} An unsent draft claims the tour already happened. Do not send that draft. It is not prior contact and it is not a completed tour.`;
+      }
+    }
+    const cashInference = input.facts.find((fact) => fact.field === 'cash_vs_finance' && fact.verification !== 'verified' && /cash/i.test(fact.value));
+    if (cashInference && !/not verified CASH/.test(`${full.whyNow} ${full.agentToolsNote}`)) {
+      full.whyNow = `${full.whyNow} Cash is a tag inference, not verified CASH.`;
+      full.agentToolsNote = `${full.agentToolsNote} Cash status is a tag inference only. It is not verified CASH.`;
+    }
     const cma = overdueCma(input);
     if (cma && !full.humanAction.includes('CMA NEEDED')) {
       full.priority = Math.max(full.priority, 85);
       full.humanAction = `${full.humanAction} CMA NEEDED. Reminder is overdue: ${cma}. PROPERTY: address not on file. Do not CMA an assumed property. RETRIEVE FROM: Agent Tools. LOOK FOR: the home to sell.`;
       if (full.internalCode === 'needs_contact' || full.internalCode === 'property_first') full.internalCode = 'cma_needed';
+      if (/sell first/i.test(any('agent_tools_tags') ?? '') && !/sell first/.test(full.agentToolsNote)) {
+        full.agentToolsNote = `${full.agentToolsNote} Agent Tools tag says needs to sell first. That tag is not a new answer from the client. The CMA is the seller task.`;
+      }
     }
     if (!input.phone && full.internalCode !== 'do_not_contact') {
       if (input.email && /^TEXT /.test(full.humanAction)) full.humanAction = full.humanAction.replace(/^TEXT /, 'EMAIL ');
@@ -651,9 +668,13 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       askQualificationNow: false,
       showingState: showing.state,
       customerPropertyState: showing.customerState,
-      agentToolsNote: note(offerMention
-        ? 'No verified cell. No number was invented. Agent Tools mentions an offer request. It is not a confirmed submission. The draft cannot be sent until a cell is on file.'
-        : 'No verified cell. No number was invented. The draft cannot be sent until a cell is on file.'),
+      agentToolsNote: note([
+        'No verified cell. No number was invented.',
+        offerMention ? 'Agent Tools mentions an offer request. It is not a confirmed submission.' : '',
+        any('saved_search') ? `Saved search stays on file: ${any('saved_search')}.` : '',
+        /text/i.test(any('agent_tools_tags') ?? '') ? 'Agent Tools tag says prefers text. That tag is not a sent message.' : '',
+        'The draft cannot be sent until a cell is on file.',
+      ].filter(Boolean).join(' ')),
       followUp: 'When a verified cell is added.',
       blockedReason: 'Verified contact is missing.',
       internalCode: 'needs_contact',

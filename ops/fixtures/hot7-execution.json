@@ -20,7 +20,8 @@
         { "field": "hot_score", "value": "165", "kind": "fact", "verification": "verified", "evidence": "Agent Tools rank score" },
         { "field": "lead_source", "value": "Redfin", "kind": "fact", "verification": "verified", "evidence": "Original source on the export" },
         { "field": "showing_address", "value": "90 SW 3rd St #308", "kind": "inference", "verification": "unverified", "evidence": "Gmail notice Sun Sep 27 6:00 PM with associate Larry Dix. Not confirmed that she attended." },
-        { "field": "gmail_tour", "value": "Sun Sep 27 6:00 PM associate Larry Dix at 90 SW 3rd St #308. Outcome unknown.", "kind": "inference", "verification": "unverified", "evidence": "Redfin Gmail notice. Unsent drafts are not contact." }
+        { "field": "gmail_tour", "value": "Sun Sep 27 6:00 PM associate Larry Dix at 90 SW 3rd St #308. Outcome unknown.", "kind": "inference", "verification": "unverified", "evidence": "Redfin Gmail notice. Unsent drafts are not contact." },
+        { "field": "sms_draft", "value": "Unsent SMS draft claims the Sep 27 tour at 90 SW 3rd St #308 already happened.", "kind": "inference", "verification": "unverified", "evidence": "Prepared draft only. It was not sent. No source confirms the tour happened." }
       ]
     },
     {

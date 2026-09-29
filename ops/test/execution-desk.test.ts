@@ -267,14 +267,27 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.ok(echo);
   assert.match(echo.humanAction, /OUTCOME UNKNOWN/);
   assert.match(echo.clientDraft ?? '', /did you end up seeing/);
+  assert.doesNotMatch(`${echo.clientDraft} ${echo.humanAction}`, /already happened|SHOWING_COMPLETED|TEXT SENT/);
+  assert.match(echo.agentToolsNote, /Do not send that draft/);
+  assert.equal(echo.showingState, 'OUTCOME_UNKNOWN');
   assert.equal(echo.askQualificationNow, false);
   const claudia = brief.cards.find((card) => card.clientName === 'Claudia Pinheiro');
   assert.match(claudia?.humanAction ?? '', /CALL/);
   const mark = brief.cards.find((card) => card.clientName === 'Mark Maccagno');
   assert.match(mark?.humanAction ?? '', /GET MARK MACCAGNO'S CELL/);
+  assert.match(mark?.agentToolsNote ?? '', /offer request/);
+  assert.doesNotMatch(mark?.humanAction ?? '', /OFFER SUBMITTED/);
+  const perry = brief.cards.find((card) => card.clientName === 'Perry Crawford');
+  assert.match(perry?.humanAction ?? '', /GET PERRY CRAWFORD'S CELL/);
+  assert.match(perry?.agentToolsNote ?? '', /Saved search stays on file/);
   const katherine = brief.cards.find((card) => card.clientName === 'Katherine De Armas');
   assert.match(katherine?.humanAction ?? '', /CMA NEEDED/);
   assert.match(katherine?.humanAction ?? '', /May 18/);
+  assert.match(katherine?.agentToolsNote ?? '', /needs to sell first/);
+  assert.equal(katherine?.askQualificationNow, false);
+  const valleCard = brief.cards.find((card) => card.clientName === 'Erena & Rick Valle');
+  assert.match(`${valleCard?.whyNow} ${valleCard?.agentToolsNote}`, /not verified CASH/);
+  assert.doesNotMatch(valleCard?.humanAction ?? '', /verified CASH|cash purchase/);
   const echoAction = db.get(
     `SELECT action_type, priority_score FROM next_best_actions WHERE opportunity_id = ? AND is_primary = 1`,
     echo.opportunityId,
@@ -289,6 +302,7 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   );
   assert.equal(text(valleAction, 'action_type'), 'tour_follow_up');
   assert.notEqual(text(valleAction, 'action_type'), 'confirm_tour_details');
+  assert.notEqual(text(db.get(`SELECT financing_state FROM opportunities WHERE id = ?`, valle.opportunityId), 'financing_state'), 'CASH');
   assert.ok(katherine?.opportunityId);
   const seller = db.get(
     `SELECT o.next_action FROM opportunities o
