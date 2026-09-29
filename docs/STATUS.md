@@ -22,7 +22,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test`: **168 passed, 0 failed** on 2026-09-29 after the section 9, 13, 23, 24, 39, 42, 45, and 49 desk work. `cd backend && npx tsc --noEmit && npm test`: **22 passed, 0 failed**. The new checks are in `ops/test/execution-desk.test.ts`. Tour-first checks remain in `ops/test/tour-first.test.ts`. Agent Tools checks remain in `ops/test/agent-tools-ingest.test.ts`.
+Typecheck passed. `npm test`: **179 passed, 0 failed** on 2026-09-29 after the v5 desk pass (clock split, tiers, waiting, promises, manual outcome marks, live-master import, prompt modules, evaluation harness). `cd backend && npx tsc --noEmit && npm test`: typecheck passed and **22 passed, 0 failed** on this same run. The new checks are in `ops/test/v5-desk.test.ts` and `ops/test/evaluation-harness.test.ts`. Tour-first checks remain in `ops/test/tour-first.test.ts`. Agent Tools checks remain in `ops/test/agent-tools-ingest.test.ts`.
 
 The first test run, before Pillow was installed, was 51 passed and 1 failed. The failure was the screenshot fixture (`Pillow is required to draw the screenshot fixture.`). After Pillow was installed, that test passed with the rest. Pillow is an environment tool, not an `ops` dependency.
 

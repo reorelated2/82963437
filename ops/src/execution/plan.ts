@@ -66,6 +66,15 @@ export interface ExecutionCard {
   milestones: TransactionMilestone[];
   showingLines: string[];
   showingConflict: string | null;
+  tier: 0 | 1 | 2 | 3;
+  horizon: 'SHORT' | 'MID' | 'LONG';
+  actionVerb: string;
+  executionAdapter: string;
+  phone: string | null;
+  waitingOn: string | null;
+  promiseLine: string | null;
+  workflowDrift: boolean;
+  showingLabel: string;
 }
 
 const URL_OK = /^https:\/\/[^\s]+$/i;
@@ -106,7 +115,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     hotScore: Number.isFinite(hotScore) ? hotScore : 0,
   };
 
-  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
+  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict' | 'tier' | 'horizon' | 'actionVerb' | 'executionAdapter' | 'phone' | 'waitingOn' | 'promiseLine' | 'workflowDrift' | 'showingLabel'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
     const full = { ...card, manualActionRequired: true as const, approvalRequired: true as const, live: false as const } as ExecutionCard;
     for (const draft of [full.clientDraft, full.callOpening, full.emailDraft]) {
       if (!draft) continue;
@@ -180,6 +189,39 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       paste: full.agentToolsNote,
       thenSet: 'Set a reminder and the next action only. Do not change stage, tour completion, or offer status without evidence.',
     };
+    const due = input.facts.find((fact) => fact.field === 'action_due_at' && fact.kind === 'fact' && fact.verification === 'verified');
+    if (due) {
+      const hours = (Date.parse(due.value) - input.now.getTime()) / 3_600_000;
+      if (Number.isFinite(hours) && hours <= 2) full.priority += 12;
+    }
+    full.phone = input.phone;
+    full.tier = tierFor(full.internalCode, full.showingState);
+    full.horizon = full.tier <= 1 ? (full.tier === 0 ? 'SHORT' : 'MID') : full.tier === 2 ? 'MID' : 'LONG';
+    if (full.clientDraft) {
+      full.actionVerb = 'TEXT CLIENT';
+      full.executionAdapter = 'COPY → OPEN MESSAGES → PASTE → SEND';
+    } else if (full.callOpening) {
+      full.actionVerb = 'CALL CLIENT';
+      full.executionAdapter = 'COPY OPENING → CALL FROM THE PHONE → LISTEN';
+    } else if (full.emailDraft) {
+      full.actionVerb = 'EMAIL CLIENT';
+      full.executionAdapter = 'COPY → OPEN MAIL → PASTE → SEND';
+    } else {
+      full.actionVerb = 'MANUAL STEP';
+      full.executionAdapter = 'NO PROVIDER. KYLE DOES THIS STEP.';
+    }
+    full.waitingOn = verified('waiting_active') === 'yes' ? (verified('waiting_party') || 'CLIENT') : null;
+    full.promiseLine = verified('promise_open') === 'yes' ? verified('kyle_promise') : null;
+    full.workflowDrift = false;
+    full.showingLabel = showingLabel(full.showingState);
+    if (full.showingState === 'OUTCOME_UNKNOWN') {
+      full.showingLines = full.showingLines.map((line) => line.replace(/\bupcoming\b/gi, 'past scheduled'));
+      if (full.customerPropertyState === 'Scheduled') full.customerPropertyState = 'Past scheduled';
+    }
+    const listPrice = input.facts.find((fact) => fact.field === 'list_price' || fact.field === 'clicked_price');
+    if (listPrice && !verified('budget') && !/list price is not a budget/i.test(full.whyNow)) {
+      full.whyNow = `${full.whyNow} A list price is not a budget.`;
+    }
     return full;
   };
 
@@ -207,6 +249,110 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       followUp: 'None until Kyle clears the opt out.',
       owner: 'Kyle',
       internalCode: 'do_not_contact',
+    });
+  }
+
+  if (verified('promise_open') === 'yes' && verified('kyle_promise')) {
+    const promise = verified('kyle_promise') ?? '';
+    return finish({
+      ...base,
+      priority: 98,
+      whyNow: 'Kyle made a promise. The client is waiting on Kyle. That outranks a passive lead.',
+      humanAction: `DO THE PROMISE. ${promise}`,
+      clientDraft: null,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'Kyle to do the thing he promised.',
+      ifYesNext: 'Mark the promise kept only after it is done.',
+      ifNoNext: 'Tell them the new time.',
+      ifUnclearNext: 'Do not send a new question while this promise is open.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: 'UNKNOWN',
+      customerPropertyState: 'Unknown',
+      agentToolsNote: note(`Promise on file: ${promise}. It is not done until Kyle marks it kept.`),
+      followUp: 'When the promise is done.',
+      internalCode: 'promise',
+    });
+  }
+
+  if (verified('last_outcome') === 'client_replied') {
+    return finish({
+      ...base,
+      priority: 80,
+      whyNow: 'Kyle marked that the client replied. The prior draft is not the next send.',
+      humanAction: `READ THE REPLY FROM ${input.name.toUpperCase()}. Do not send the previous draft again.`,
+      clientDraft: null,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'The one next step in their reply.',
+      ifYesNext: 'Do that one step.',
+      ifNoNext: 'Ask one short question.',
+      ifUnclearNext: 'Ask them to name the one thing.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: 'UNKNOWN',
+      customerPropertyState: 'Unknown',
+      agentToolsNote: note('Client reply was marked by Kyle. The desk did not read a mailbox.'),
+      followUp: 'The next step from the reply.',
+      internalCode: 'client_replied',
+    });
+  }
+
+  if (verified('last_outcome') === 'interested' || verified('last_outcome') === 'not_interested') {
+    const interested = verified('last_outcome') === 'interested';
+    return finish({
+      ...base,
+      priority: 82,
+      whyNow: interested ? 'They said they are interested.' : 'They said it is not the one.',
+      humanAction: interested
+        ? `TEXT ${input.name.toUpperCase()} NOW. Ask what they want to do next.`
+        : `TEXT ${input.name.toUpperCase()} NOW. Ask what missed.`,
+      clientDraft: interested
+        ? `${first(input.name)}, what do you want to do next on this one?`
+        : `${first(input.name)}, what missed for you?`,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: interested ? 'The next step they want.' : 'What missed.',
+      ifYesNext: interested ? 'Offer to write only if they ask.' : 'Use that to change the search.',
+      ifNoNext: 'Stop on this property.',
+      ifUnclearNext: 'Ask once more.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: 'UNKNOWN',
+      customerPropertyState: 'Unknown',
+      agentToolsNote: note('Outcome was marked by Kyle. It was not verified by an integration.'),
+      followUp: 'Their answer.',
+      internalCode: interested ? 'interested' : 'not_interested',
+    });
+  }
+
+  if (verified('waiting_active') === 'yes') {
+    const party = (verified('waiting_party') || 'CLIENT').replaceAll('_', ' ');
+    const end = verified('waiting_end') || 'the end condition on file';
+    return finish({
+      ...base,
+      priority: 36,
+      whyNow: `Waiting on ${party}. Do not open a new question while this wait is real.`,
+      humanAction: `WAITING ON ${party}. END WHEN: ${end}.`,
+      clientDraft: null,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: end,
+      ifYesNext: 'One next step from that answer.',
+      ifNoNext: 'Leave the wait in place.',
+      ifUnclearNext: 'Do not send a second message.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: 'UNKNOWN',
+      customerPropertyState: 'Unknown',
+      agentToolsNote: note(`Waiting on ${party}. No new outreach was prepared.`),
+      followUp: end,
+      internalCode: 'waiting',
     });
   }
 
@@ -253,7 +399,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       qualificationQuestion: 'What is prompting the move?',
       askQualificationNow: false,
       showingState: 'OUTCOME_UNKNOWN',
-      customerPropertyState: 'Scheduled',
+      customerPropertyState: 'Past scheduled',
       agentToolsNote: note(`Text prepared asking whether they saw ${property ?? 'the property'}. The tour outcome is not confirmed.`),
       followUp: 'Customer reply about attendance.',
       internalCode: 'tour_follow_up',
@@ -377,6 +523,30 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       agentToolsNote: note('Calendar conflict. No event was created.'),
       followUp: 'A resolved time.',
       internalCode: 'calendar_conflict',
+    });
+  }
+
+  if (verified('listing_consult') === 'scheduled') {
+    return finish({
+      ...base,
+      priority: 70,
+      whyNow: 'A listing appointment is on the calendar. It is not a listing.',
+      humanAction: 'LISTING APPT IS SET. It is not a listing yet.',
+      clientDraft: null,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'The appointment to happen.',
+      ifYesNext: 'Record only what was decided.',
+      ifNoNext: 'Leave the listing file unopened.',
+      ifUnclearNext: 'Do not mark a listing active.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: showing.state,
+      customerPropertyState: showing.customerState,
+      agentToolsNote: note('Listing appointment is not an active listing.'),
+      followUp: 'After the appointment.',
+      internalCode: 'listing_opportunity',
     });
   }
 
@@ -821,6 +991,31 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       agentToolsNote: note('Preapproval is verified. The desk did not contact a lender.'),
       followUp: 'Their property answer.',
       internalCode: 'preapproved',
+    });
+  }
+
+  const financeNote = input.facts.find((fact) => fact.field === 'financing_note' && /preapproval/i.test(fact.value));
+  if (financeNote && !verified('financing_state')) {
+    return finish({
+      ...base,
+      priority: 64,
+      whyNow: 'A file note says preapproval is still open. That note is not a verified preapproval and it does not disqualify them.',
+      humanAction: `GET PREAPPROVAL STATUS. TEXT ${input.name.toUpperCase()} NOW.`,
+      clientDraft: `${first(input.name)}, are you planning to finance it or buy cash?`,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'Cash or financing.',
+      ifYesNext: 'If they finance, ask whether they are already approved.',
+      ifNoNext: 'If cash, stop the lender questions.',
+      ifUnclearNext: 'Ask cash or finance once more.',
+      qualificationQuestion: null,
+      askQualificationNow: false,
+      showingState: showing.state,
+      customerPropertyState: showing.customerState,
+      agentToolsNote: note('Preapproval note is not a verified financing fact. No mortgage advice was given.'),
+      followUp: 'Their cash or finance answer.',
+      internalCode: 'needs_preapproval',
     });
   }
 
@@ -1561,7 +1756,9 @@ function justifiedShowings(input: DeskEvidence, current: string): string[] {
   if (verified('access_confirmed')) add('ACCESS_CONFIRMED');
   if (verified('buyer_notified')) add('BUYER_NOTIFIED');
   if (verified('buyer_acknowledged')) add('BUYER_ACKNOWLEDGED');
+  if (current === 'SHOWING_SCHEDULED') add('SHOWING_SCHEDULED');
   if (current === 'SHOWING_COMPLETED') add('SHOWING_COMPLETED');
+  if (current === 'SHOWING_CANCELLED') add('SHOWING_CANCELLED');
   if (/cancel/i.test(verified('buying_activity'))) add('SHOWING_CANCELLED');
   if (verified('reschedule')) add('RESCHEDULE_NEEDED');
   if (current === 'OUTCOME_UNKNOWN') add('OUTCOME_UNKNOWN');
@@ -1589,11 +1786,14 @@ function deriveShowing(input: DeskEvidence, property: string | null): { state: s
   if (inference && /coordinator|associate|showing agent/i.test(`${inference.field} ${inference.value}`)) {
     return { state: 'OUTCOME_UNKNOWN', customerState: 'Unknown', associateOnly: true };
   }
-  if (scheduled && past) return { state: 'OUTCOME_UNKNOWN', customerState: 'Scheduled', associateOnly: false };
+  if (scheduled && /\bcancel/i.test(scheduled) && !/not cancel/i.test(scheduled)) {
+    return { state: 'SHOWING_CANCELLED', customerState: 'Cancelled', associateOnly: false };
+  }
+  if (scheduled && past) return { state: 'OUTCOME_UNKNOWN', customerState: 'Past scheduled', associateOnly: false };
   if (verified('showing_requested') || /tour request/i.test(scheduled)) {
     return { state: 'CUSTOMER_REQUESTED', customerState: 'Requested', associateOnly: false };
   }
-  if (scheduled && !past) return { state: 'ACCESS_PENDING', customerState: 'Scheduled', associateOnly: false };
+  if (scheduled && !past) return { state: 'SHOWING_SCHEDULED', customerState: 'Scheduled', associateOnly: false };
   return { state: property ? 'UNKNOWN' : 'UNKNOWN', customerState: 'Unknown', associateOnly: false };
 }
 
@@ -1625,7 +1825,7 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     || (/offer request/i.test(`${card.whyNow} ${card.agentToolsNote}`) && !/No offer request is on file/i.test(card.offerReadiness.nextAction));
   const header: BriefBucket[] = [
     bucket('Actionable clients', cards, (card) => card.internalCode !== 'do_not_contact'),
-    bucket('Showings today', cards, (card) => card.showingState === 'ACCESS_PENDING'),
+    bucket('Showings today', cards, (card) => card.showingState === 'ACCESS_PENDING' || card.showingState === 'SHOWING_SCHEDULED'),
     bucket('Showings requiring confirmation', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
     bucket('Hot post-tour clients', cards, postTour),
     bucket('Offers or offer requests', cards, offers),
@@ -1645,7 +1845,7 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     bucket('EMAILS TO SEND', cards, (card) => Boolean(card.emailDraft)),
     bucket('LISTING AGENTS TO CONTACT', cards, (card) => card.internalCode === 'listing_agent_missing'),
     bucket('SHOWINGS TO CONFIRM', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
-    bucket('SHOWINGS TODAY', cards, (card) => card.showingState === 'ACCESS_PENDING'),
+    bucket('SHOWINGS TODAY', cards, (card) => card.showingState === 'ACCESS_PENDING' || card.showingState === 'SHOWING_SCHEDULED'),
     bucket('POST TOUR FOLLOW UPS', cards, postTour),
     bucket('FINANCING ITEMS', cards, (card) => card.internalCode === 'needs_preapproval'),
     bucket('BUY AFTER SELL ITEMS', cards, (card) => card.internalCode === 'sale_dependency' || card.internalCode === 'cma_needed'),
@@ -1684,7 +1884,7 @@ export function easternClock(now: Date): { date: string; easternTime: string } {
   };
 }
 
-export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
+export function renderMorningBrief(cards: ExecutionCard[], now: Date, clockSource: 'production' | 'injected' = 'production'): string {
   const clock = easternClock(now);
   const ordered = [...cards];
   const sections = morningSections(ordered);
@@ -1692,6 +1892,7 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
     'KYLEOS MORNING BRIEF',
     `Date: ${clock.date}`,
     `Current ET: ${clock.easternTime}`,
+    `Clock: ${clockSource} / America/New_York`,
     ...sections.header.map(bucketLine),
     '',
     'DO THESE FIRST',
@@ -1699,12 +1900,14 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
   ordered.forEach((card, index) => {
     lines.push(
       '',
-      `PRIORITY ${index + 1} / ${card.clientName.toUpperCase()}`,
+      `PRIORITY ${index + 1} / TIER ${card.tier} / ${card.horizon} / ${card.clientName.toUpperCase()}`,
       `WHY NOW: ${card.whyNow}`,
       `STAGE: ${card.clientStage}`,
+      `ACTION: ${card.actionVerb}`,
+      `EXECUTION ADAPTER: ${card.executionAdapter}`,
       `PROPERTY: ${card.propertyAddress ?? 'DATA NEEDED'}`,
       `PROPERTY STATUS: ${card.propertyStatus}`,
-      `SHOWING: ${card.showingState}`,
+      `SHOWING: ${card.showingLabel}`,
       ...(card.showingLines.length ? card.showingLines : ['SHOWING DETAIL: none on file']),
       card.showingConflict ?? 'SHOWING CONFLICT: none',
       `DO THIS: ${card.primaryAction}`,
@@ -1734,4 +1937,43 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
   });
   lines.push('', 'SUMMARY', ...sections.summary.map(bucketLine), 'Nothing was sent. Agent Tools was not written.');
   return lines.join('\n');
+}
+
+const TIER_0 = new Set([
+  'tour_follow_up', 'call_requested', 'promise', 'offer_accepted', 'offer_submitted', 'offer_draft',
+  'offer_interest', 'offer_terms_missing', 'closed', 'effective_date', 'inspection_deadline',
+  'walkthrough_scheduled', 'loan_not_ctc', 'calendar_conflict',
+]);
+const TIER_1 = new Set([
+  'needs_preapproval', 'sale_dependency', 'listing_agent_missing', 'property_conflict', 'inspection_unknown',
+]);
+const TIER_2 = new Set([
+  'showing_requested', 'saved_search', 'property_first', 'needs_contact', 'waiting', 'property_unavailable', 'cma_needed',
+]);
+
+export function tierFor(internalCode: string, showingState: string): 0 | 1 | 2 | 3 {
+  if (showingState === 'OUTCOME_UNKNOWN' || showingState === 'SHOWING_SCHEDULED') return 0;
+  if (TIER_0.has(internalCode)) return 0;
+  if (TIER_1.has(internalCode)) return 1;
+  if (TIER_2.has(internalCode)) return 2;
+  return 3;
+}
+
+export function showingLabel(state: string): string {
+  const labels: Record<string, string> = {
+    CUSTOMER_REQUESTED: 'CUSTOMER REQUESTED',
+    SHOWING_REQUEST_CREATED: 'REQUEST CREATED',
+    LISTING_SIDE_CONTACTED: 'LISTING SIDE CONTACTED',
+    ACCESS_PENDING: 'ACCESS PENDING',
+    ACCESS_CONFIRMED: 'ACCESS CONFIRMED',
+    BUYER_NOTIFIED: 'BUYER NOTIFIED',
+    BUYER_ACKNOWLEDGED: 'BUYER ACKNOWLEDGED',
+    SHOWING_SCHEDULED: 'SCHEDULED',
+    SHOWING_COMPLETED: 'COMPLETED',
+    SHOWING_CANCELLED: 'CANCELLED',
+    RESCHEDULE_NEEDED: 'RESCHEDULE NEEDED',
+    OUTCOME_UNKNOWN: 'POST TOUR VERIFICATION NEEDED',
+    UNKNOWN: 'UNKNOWN',
+  };
+  return labels[state] ?? state.replaceAll('_', ' ');
 }

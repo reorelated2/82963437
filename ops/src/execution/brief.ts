@@ -2,6 +2,8 @@ import { enqueueApproval } from '../conversion/approval.ts';
 import { nextBestAction } from '../conversion/engine.ts';
 import { text, type SqlDb } from '../sql.ts';
 import { integrationCapabilities, type IntegrationCapability } from './capabilities.ts';
+import { clockFrom, type ClockSource } from './clock.ts';
+import { continuityFacts, isWorkflowDrift } from './continuity.ts';
 import { fridayReport, type FridayReport } from './friday.ts';
 import { planDesk, renderMorningBrief, morningSections, easternClock, type BriefBucket, type DeskFact, type ExecutionCard } from './plan.ts';
 import { recordShowingTransition } from './showing.ts';
@@ -21,10 +23,12 @@ export interface MorningBrief {
   sections: { header: BriefBucket[]; summary: BriefBucket[] };
   capabilities: IntegrationCapability[];
   friday: FridayReport;
-  clock: { date: string; easternTime: string };
+  clock: { date: string; easternTime: string; source: ClockSource; zone: 'America/New_York'; instant: string };
 }
 
-export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
+export function buildMorningBrief(db: SqlDb, now?: Date): MorningBrief {
+  const clock = clockFrom(now);
+  const at = clock.now;
   const rows = db.all(
     `SELECT o.id AS opportunity_id, o.client_id, o.primary_stage, o.original_lead_source, o.source_system,
             c.display_name, c.status AS client_status
@@ -60,6 +64,8 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
         verification: 'verified',
       });
     }
+    facts.push(...continuityFacts(db, opportunityId));
+    const drift = isWorkflowDrift(db, opportunityId);
     const card = planDesk({
       name: text(row, 'display_name') || 'Unknown',
       stage: text(row, 'primary_stage') || 'NEW_INQUIRY',
@@ -67,20 +73,27 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
       email,
       dnc,
       facts,
-      now,
+      now: at,
     });
     card.opportunityId = opportunityId;
+    if (drift && card.internalCode !== 'do_not_contact') {
+      card.workflowDrift = true;
+      card.whyNow = `WORKFLOW DRIFT. No next action, waiting condition, or future trigger was stored. ${card.whyNow}`;
+      card.secondaryActions = [card.humanAction, ...card.secondaryActions];
+      card.humanAction = 'WORKFLOW DRIFT. Give this file a next action, a waiting condition, or a future trigger.';
+      card.primaryAction = card.humanAction;
+    }
     for (const state of card.showingTransitions) {
       recordShowingTransition(db, {
         opportunityId,
         state,
         source: 'execution_desk',
         evidence: card.whyNow,
-        now,
+        now: at,
       });
     }
     cards.push(card);
-    nextBestAction(db, opportunityId, now);
+    nextBestAction(db, opportunityId, at);
     const draft = card.clientDraft ?? card.emailDraft ?? card.callOpening;
     if (draft) {
       enqueueApproval(db, {
@@ -93,7 +106,7 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
         riskLevel: 'low',
         source: 'execution_desk',
         createdBy: 'system',
-        now,
+        now: at,
       });
     }
   }
@@ -104,7 +117,7 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
   return {
     generated: true,
     live: false,
-    text: renderMorningBrief(ordered, now),
+    text: renderMorningBrief(ordered, at, clock.source),
     cards: ordered,
     summary: {
       texts: ordered.filter((card) => card.clientDraft).length,
@@ -115,8 +128,8 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
     },
     sections: morningSections(ordered),
     capabilities: integrationCapabilities(),
-    friday: fridayReport(db, now),
-    clock: easternClock(now),
+    friday: fridayReport(db, at),
+    clock: { ...easternClock(at), source: clock.source, zone: clock.zone, instant: at.toISOString() },
   };
 }
 

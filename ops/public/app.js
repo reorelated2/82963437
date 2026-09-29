@@ -152,7 +152,7 @@ function morningView() {
   wrap.append(el('button', {
     type: 'button',
     class: 'primary',
-    text: 'Load synthetic Hot 7',
+    text: 'Load Hot 7 fixture',
     onclick: async () => {
       state.brief = await api('/api/execution/hot7', { method: 'POST', body: '{}' });
       state.notice = 'Synthetic Hot 7 brief generated. Nothing was sent.';
@@ -169,8 +169,15 @@ function morningView() {
     const box = el('article', { class: 'exec-card', id: card.anchor || '' });
     box.append(
       el('h3', { text: `${card.priority}. ${card.clientName}` }),
+      el('p', { class: 'tier', text: `TIER ${card.tier} · ${card.horizon}` }),
       el('p', { text: card.whyNow }),
+      el('p', { text: card.showingLabel ? `SHOWING: ${card.showingLabel}` : '' }),
+      el('p', { text: `${card.actionVerb || 'MANUAL STEP'} · ${card.executionAdapter || 'NO PROVIDER. KYLE DOES THIS STEP.'}` }),
     );
+    const tel = telHref(card.phone);
+    if (tel) {
+      box.append(el('a', { class: 'call-link', href: tel, text: 'CALL' }));
+    }
     for (const line of card.showingLines || []) box.append(el('p', { text: line }));
     if (card.showingConflict) box.append(el('p', { class: 'rule', text: card.showingConflict }));
     box.append(el('p', { class: 'action', text: card.primaryAction || card.humanAction }));
@@ -201,10 +208,23 @@ function morningView() {
       ['sent_manually', 'MARK SENT MANUALLY'],
       ['called', 'MARK CALLED'],
       ['agent_tools_updated', 'MARK AGENT TOOLS UPDATED'],
-      ['waiting', 'MARK WAITING FOR RESPONSE'],
+      ['waiting', 'MARK WAITING'],
       ['showing_completed', 'MARK SHOWING COMPLETED'],
       ['showing_cancelled', 'MARK SHOWING CANCELLED'],
       ['offer_submitted', 'MARK OFFER SUBMITTED'],
+      ['client_replied', 'CLIENT REPLIED'],
+      ['no_reply', 'NO REPLY'],
+      ['call_completed', 'CALL COMPLETED'],
+      ['showing_occurred', 'SHOWING OCCURRED'],
+      ['showing_did_not', 'SHOWING DID NOT OCCUR'],
+      ['interested', 'INTERESTED'],
+      ['not_interested', 'NOT INTERESTED'],
+      ['wants_offer', 'WANTS OFFER'],
+      ['needs_financing', 'NEEDS FINANCING'],
+      ['needs_to_sell', 'NEEDS TO SELL'],
+      ['contact_found', 'CONTACT FOUND'],
+      ['property_unavailable', 'PROPERTY UNAVAILABLE'],
+      ['listing_appt_set', 'LISTING APPT SET'],
     ]) {
       box.append(el('button', {
         type: 'button',
@@ -228,6 +248,7 @@ function sectionList(title, buckets, id, clock) {
   if (clock) {
     box.append(el('p', { text: `Date: ${clock.date}` }));
     box.append(el('p', { text: `Current ET: ${clock.easternTime}` }));
+    box.append(el('p', { text: `Clock: ${clock.source || 'production'} / ${clock.zone || 'America/New_York'}` }));
   }
   for (const bucket of buckets || []) {
     const row = el('p');
@@ -242,24 +263,23 @@ function sectionList(title, buckets, id, clock) {
 }
 
 function capabilityTable(rows) {
-  const box = el('section', { id: 'integration-capabilities' });
+  const box = el('section', { id: 'integration-capabilities', class: 'stack' });
   box.append(el('h2', { text: 'Integration capabilities' }));
   box.append(el('p', { class: 'rule', text: 'HUMAN ACTION MODE. No send, write, or provider confirmation is available.' }));
-  const table = el('table', { class: 'capability-table' });
-  const head = el('tr');
-  for (const label of ['Integration', 'Read', 'Search', 'Draft', 'Create', 'Update', 'Send', 'Call', 'Schedule', 'Confirm delivery', 'Confirm completion', 'Mode']) {
-    head.append(el('th', { text: label }));
-  }
-  table.append(head);
   for (const row of rows) {
-    const line = el('tr');
-    for (const value of [row.integration, row.read, row.search, row.draft, row.create, row.update, row.send, row.call, row.schedule, row.confirmDelivery, row.confirmCompletion, row.mode]) {
-      line.append(el('td', { text: value }));
-    }
-    table.append(line);
+    const card = el('article', { class: 'cap-card' });
+    card.append(el('h3', { text: row.integration }));
+    card.append(el('p', { text: `Mode ${row.mode}. Read ${row.read}. Search ${row.search}. Draft ${row.draft}. Create ${row.create}. Update ${row.update}. Send ${row.send}. Call ${row.call}. Schedule ${row.schedule}. Confirm delivery ${row.confirmDelivery}. Confirm completion ${row.confirmCompletion}.` }));
+    box.append(card);
   }
-  box.append(table);
   return box;
+}
+
+function telHref(phone) {
+  const digits = String(phone || '').replace(/[^\d+]/g, '');
+  const bare = digits.replace(/\D/g, '');
+  if (bare.length < 10) return null;
+  return `tel:${digits}`;
 }
 
 function fridayBlock(report) {
@@ -299,7 +319,7 @@ async function markCard(opportunityId, mark) {
     method: 'POST',
     body: JSON.stringify({ opportunityId, mark }),
   });
-  state.notice = result.reason || 'KyleOS updated. Nothing was sent.';
+  state.notice = result.reason || 'MARKED BY KYLE. Nothing was sent. Not verified by an integration.';
   await loadMorning();
 }
 
@@ -750,12 +770,33 @@ async function post(path) {
 }
 
 async function copyText(value) {
+  const area = document.createElement('textarea');
+  area.value = value;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.top = '0';
+  area.style.left = '0';
+  area.style.opacity = '0';
+  document.body.append(area);
+  area.focus();
+  area.select();
+  let copied = false;
   try {
-    await navigator.clipboard.writeText(value);
-    state.notice = 'Message copied. Paste it into your texting app yourself.';
+    copied = document.execCommand('copy');
   } catch {
-    state.error = 'Copy failed. Select the message and copy it manually.';
+    copied = false;
   }
+  if (!copied && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(value);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+  }
+  area.remove();
+  if (copied) state.notice = 'Message copied. Paste it into your texting app yourself. Nothing was sent.';
+  else state.error = 'Copy failed. Select the message and copy it manually.';
   render();
 }
 

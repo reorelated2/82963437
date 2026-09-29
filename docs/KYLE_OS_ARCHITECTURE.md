@@ -203,3 +203,42 @@ The real 28-record export (26 leads and 2 `needs_review`) is not in this repo. `
 `planDesk` reads verified facts and refuses to promote an inference. A past dated tour, including Agent Tools month-name dates such as `Sep 20` and `Sep 15`, becomes POST TOUR VERIFICATION NEEDED / OUTCOME UNKNOWN. An undated scheduled-tour line stays a confirmation task. An associate or coordinator note stays SHOWING OUTCOME NOT CONFIRMED. A verified overdue CMA reminder opens one linked `redfin_seller` opportunity through `ensureOverdueCmaSeller`. That path does not call `linkSellerOpportunity`, because that helper also marks the buyer sale blocked. The seller row is the task. Desk `tasks` require a contact, and a held record has none. Drafts pass `screenKyleVoice` (no em dashes, no banned phrases). The Agent Tools loader calls `publishExecution` on both the applied path and the held path, so a draft is enqueued with `enqueueApproval` as `manual_action` / `execution_desk` and stays PENDING. A held record with no phone and no email still gets a card: GET CELL, and where to look. COPY copies text. OPEN opens a link only when the card status is `verified` and the URL is `https`. MARK calls `applyManualMark`, which writes a canonical `manual_mark` event and never a sent message or an Agent Tools write.
 
 The Hot 7 regression fixture is pseudonymized and committed at `ops/fixtures/hot7-execution.json`. `seedHot7` loads it with `loadAgentToolsDataset`, the same loader as a real Agent Tools file. Names and property addresses from the 2026-09-28 inputs are kept. Phones are `3055552101` through `3055552103`. Emails are `*.fixture@example.com`. Real phones and emails are not in git. Claudia is labeled `hot7-claudia-not-in-export` because she is not in the 62-buyer export. No Redfin, Agent Tools, or MLS URL is invented. Missing links render as LINK NOT FOUND. Missing property or contact says DATA NEEDED and names Agent Tools as the place to look.
+
+## 12. Information flow (2026-09-29 v5 pass)
+
+This section is the map of the existing app. It is not a second product.
+
+```
+signal (paste, screenshot, Agent Tools JSON, or a local lead-master file)
+  -> extract / ingestCanonicalLead or openCanonicalShell
+  -> clients + client_identifiers (phone, email, agent_tools_id, redfin_customer_id)
+  -> one open opportunity per client and business line
+  -> client_facts (fact vs inference, verified vs unverified)
+  -> consent, communication_log, approval_queue, intended next_best_actions
+  -> showing_transitions, waiting_states, promises, execution_marks
+  -> planDesk (one card) -> buildMorningBrief (a view, not the engine)
+  -> Kyle: COPY / OPEN / tel CALL / MARK
+  -> mark writes KyleOS only -> waiting or outcome fact -> brief reranks
+```
+
+| Piece | Where it lives | What it does |
+| --- | --- | --- |
+| Prompts | `ops/src/prompts/registry.ts` version `2026-09-29.1`. Older core text in `policy/KYLEOS_CORE_PROMPT.md`. | Sixteen modules. No model is called. `screenKyleVoice` still rejects banned phrases and em dashes on drafts. |
+| Ingestion | `ops/src/workflow.ts`, `ops/src/canonical.ts`, `ops/src/ingest/agentTools.ts`, `ops/src/ingest/liveMaster.ts` | Paste and screenshot stay on the desk. Agent Tools JSON stays on its loader and still refuses a bulk apply over 8 records. The lead-master shape is a separate local reader. A real file must sit in `ops/data/live/` (gitignored) or outside the repo. `KYLEOS_LIVE_LEADS` is the only path the HTTP import route will read. |
+| Schemas | Desk SQLite via `openDatabase` | clients, opportunities, events, client_facts, consent, approval_queue, next_best_actions, showing_transitions, waiting_states, promises, execution_marks. The buyer ledger in `ops/src/runtime/store.ts` is still a second file and is not the desk. |
+| Ranking | `planDesk` then a numeric sort in `buildMorningBrief` | Tier 0–3 is a label on the card. The sort is still the existing score, plus a +12 when a verified `action_due_at` is inside two hours. Hot 7 order is unchanged because that fixture has no `action_due_at`. |
+| Hot buyer | `ops/fixtures/hot7-execution.json` and `seedHot7` | Regression fixture only. `POST /api/execution/hot7` refuses when any `is_demo = 0` client exists. The fixture clock is `2026-09-29T13:00:00.000Z`. |
+| Clock | `ops/src/execution/clock.ts` | `buildMorningBrief(db)` with no instant is production: wall clock, `America/New_York`, `source: production`. Passing an instant marks the clock `injected`. |
+| Showing | `ops/src/execution/showing.ts`, `deriveShowing` | States include `SHOWING_SCHEDULED`. A past scheduled tour is `OUTCOME_UNKNOWN` and the label is POST TOUR VERIFICATION NEEDED. The word upcoming is stripped from those lines. Associate or coordinator contact is not Kyle contact and is not completion. |
+| Waiting and drift | `ops/src/execution/continuity.ts` | Waiting rows store party, reason, start, end condition, next check, stale after, and `marked_by_kyle`. An open buyer with no next action, no trigger, no wait, and no promise is WORKFLOW DRIFT on the card. |
+| Promises | `promises` | An open Kyle promise is priority 98 and outranks a passive tour. |
+| Approval and execution | `approval_queue`, `applyManualMark`, `ops/src/mode.ts` | Drafts stay PENDING. `liveChannelPermitted` is still false. MARK SENT MANUALLY opens a client wait and does not write `sent_messages`. Outcome marks store `execution_authority = marked_by_kyle`. Nothing writes `verified_by_integration`. |
+| Action vs adapter | Fields on `ExecutionCard` | `actionVerb` is TEXT CLIENT, CALL CLIENT, EMAIL CLIENT, or MANUAL STEP. `executionAdapter` is the human sequence (copy, open, paste, send). Ranking does not read the adapter. |
+| UI | `ops/public` `#/morning` | Loads `GET /api/execution/brief` from whatever is already in the desk file. COPY uses the clipboard and a hidden textarea. CALL is a `tel:` link. The capability list is stacked so a 390px screen does not scroll sideways. |
+| Tests | `ops/test/*.ts` | Existing suites stay. New coverage is `v5-desk.test.ts` and `evaluation-harness.test.ts`. The harness includes the "no test may treat X as Y" pairs. |
+
+`GET /api/execution/brief` is the production desk. It does not seed Hot 7 and it does not read the fixture instant.
+
+## 13. What this pass did not merge
+
+The buyer ledger and the desk SQLite file are still two databases. `backend/` and `mobile/` are still the consult app. No live SMS, email, voice, calendar, Agent Tools, MLS, or Redfin write was added.

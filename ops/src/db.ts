@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { applyCanonicalSchema } from './canonical.ts';
 import { applyCommunicationSchema } from './comms/schema.ts';
 import { applyConversionSchema } from './conversion/schema.ts';
+import { applyContinuitySchema } from './execution/continuity.ts';
 import { openSql, text, type SqlDb } from './sql.ts';
 
 const SCHEMA = `
@@ -240,6 +241,7 @@ export function openDatabase(path: string): SqlDb {
   applyCanonicalSchema(db);
   applyCommunicationSchema(db);
   applyConversionSchema(db);
+  applyContinuitySchema(db);
   ensureSetting(db, 'system_mode', 'DRY_RUN');
   ensureSetting(db, 'live_send', 'false');
   ensureSetting(db, 'sms_send', 'false');

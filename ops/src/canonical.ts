@@ -976,7 +976,7 @@ function flagIdentity(db: SqlDb, input: {
   }, { clients: before });
 }
 
-export type CanonicalIdentifierKind = 'phone' | 'email' | 'agent_tools_id' | 'household';
+export type CanonicalIdentifierKind = 'phone' | 'email' | 'agent_tools_id' | 'household' | 'redfin_customer_id';
 
 function rememberIdentifier(db: SqlDb, clientId: string, kind: CanonicalIdentifierKind, normalized: string | null, raw: string | null): void {
   if (!normalized) return;

@@ -15,7 +15,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; overflow-x: hidden; max-width: 100%; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -38,6 +38,7 @@ a { color: var(--teal-deep); }
 .brand {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: baseline;
 }
@@ -169,6 +170,7 @@ textarea { min-height: 220px; resize: vertical; }
 .nav button {
   background: transparent;
   border: 0;
+  min-height: 44px;
   padding: 10px 4px;
   color: var(--muted);
   font-size: 0.78rem;
@@ -215,9 +217,30 @@ textarea { min-height: 220px; resize: vertical; }
 }
 .morning button.primary { background: var(--teal); color: white; }
 .morning button:disabled { opacity: 0.55; }
-#integration-capabilities { overflow-x: auto; }
-.capability-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 14px; }
-.capability-table th, .capability-table td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.morning a.call-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--teal);
+  background: var(--teal);
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+}
+.cap-card, .exec-card, .brief-text, .rule, .top, .main {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.cap-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+}
+.cap-card h3 { margin: 0 0 6px; font-size: 1rem; }
 .morning a { color: var(--teal); font-weight: 700; }
 .brief-text {
   white-space: pre-wrap;

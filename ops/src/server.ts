@@ -12,6 +12,7 @@ import { decodeImage, readScreenshot } from './ocr.ts';
 import type { SqlDb } from './sql.ts';
 import { buildMorningBrief } from './execution/brief.ts';
 import { seedHot7 } from './execution/hot7.ts';
+import { importLiveMaster } from './ingest/liveMaster.ts';
 import { applyManualMark } from './execution/marks.ts';
 import {
   acknowledgeJob,
@@ -203,7 +204,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
     return sendJson(res, 200, buildMorningBrief(db));
   }
   if (method === 'POST' && path === '/api/execution/hot7') {
+    const liveClients = db.get(`SELECT COUNT(*) AS n FROM clients WHERE is_demo = 0`);
+    if (Number(liveClients?.n) > 0) {
+      return sendJson(res, 409, { error: 'Hot 7 is a regression fixture. This desk already has production clients. Nothing was loaded.' });
+    }
     return sendJson(res, 200, seedHot7(db));
+  }
+  if (method === 'POST' && path === '/api/execution/import-live') {
+    const file = process.env.KYLEOS_LIVE_LEADS;
+    if (!file) return sendJson(res, 400, { error: 'Set KYLEOS_LIVE_LEADS to a gitignored file. Nothing was loaded.' });
+    try {
+      return sendJson(res, 200, importLiveMaster(db, file));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Import failed.';
+      return sendJson(res, 400, { error: message });
+    }
   }
   if (method === 'POST' && path === '/api/execution/mark') {
     const body = await readJson(req);
