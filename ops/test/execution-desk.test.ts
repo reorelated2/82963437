@@ -10,7 +10,10 @@ import { ingestCanonicalLead } from '../src/canonical.ts';
 import { buildMorningBrief } from '../src/execution/brief.ts';
 import { seedHot7 } from '../src/execution/hot7.ts';
 import { applyManualMark } from '../src/execution/marks.ts';
+import { EVAL_SCENARIOS } from '../src/execution/eval.ts';
 import { planDesk, type DeskEvidence, type DeskFact } from '../src/execution/plan.ts';
+import { PROMPT_MODULE_VERSION } from '../src/execution/prompts.ts';
+import { easternClock } from '../src/time.ts';
 import { recordLeadSource } from '../src/execution/source.ts';
 import { recordShowingTransition, showingHistory, SHOWING_STATES } from '../src/execution/showing.ts';
 import { openDatabase } from '../src/db.ts';
@@ -313,7 +316,10 @@ test('showing detail keeps every tour line and leaves a missing field as DATA NE
   assert.ok(card.showingLines.some((line) => line.startsWith('9/27 6 PM Larry Dix showing, OUTCOME NOT CONFIRMED. Evidence: THIRD PARTY REPORTED.')));
   assert.ok(card.showingLines.some((line) => line.startsWith('9/20 DATA NEEDED Kyle Kleinman showing, OUTCOME NOT CONFIRMED. Evidence: THIRD PARTY REPORTED.')));
   assert.ok(card.showingLines.some((line) => line.startsWith('9/20 4 PM DATA NEEDED showing, OUTCOME NOT CONFIRMED. Evidence: THIRD PARTY REPORTED.')));
-  assert.match(card.showingConflict ?? '', /Do not pick one/);
+  assert.match(card.showingLines.join('\n'), /TOUR 9\/20, outcome not confirmed. Possible duplicate/);
+  assert.match(card.showingLines.join('\n'), /TOUR 9\/27, outcome not confirmed/);
+  assert.equal(card.showingConflict, null);
+  assert.doesNotMatch(`${card.whyNow}\n${card.showingLines.join('\n')}`, /SHOWING CONFLICT|upcoming/i);
   assert.equal(card.showingState, 'OUTCOME_UNKNOWN');
   assert.doesNotMatch(`${card.clientDraft}`, /Larry Dix|9\/27/);
   const quiet = planDesk(evidence({ name: 'No Tour', facts: [verified('property_address', '10 Fixture St')] }));
@@ -380,7 +386,11 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.ok(echo.showingLines.some((line) => line.startsWith('9/27 6 PM Larry Dix showing, OUTCOME NOT CONFIRMED')));
   assert.ok(echo.showingLines.some((line) => /9\/20 DATA NEEDED Kyle Kleinman showing, OUTCOME NOT CONFIRMED/.test(line)));
   assert.ok(echo.showingLines.some((line) => /9\/20 4 PM DATA NEEDED showing, OUTCOME NOT CONFIRMED/.test(line)));
-  assert.match(echo.showingConflict ?? '', /SHOWING CONFLICT: 9\/20 and 9\/27/);
+  assert.equal(echo.showingConflict, null);
+  assert.match(echo.showingLines.join('\n'), /TOUR 9\/20, outcome not confirmed. Possible duplicate/);
+  assert.match(echo.showingLines.join('\n'), /TOUR 9\/27, outcome not confirmed/);
+  assert.doesNotMatch(`${echo.whyNow}\n${echo.humanAction}\n${echo.showingLines.join('\n')}`, /SHOWING CONFLICT|upcoming/i);
+  assert.equal(echo.tier, 'TIER 0');
   assert.doesNotMatch(echo.showingLines.join('\n'), /SHOWING_COMPLETED/);
   const claudia = brief.cards.find((card) => card.clientName === 'Claudia Pinheiro');
   assert.match(claudia?.humanAction ?? '', /CALL/);
@@ -492,6 +502,66 @@ test('manual marks change KyleOS state only', () => {
   assert.equal(marked.writtenToAgentTools, false);
   assert.equal(Number(db.get(`SELECT COUNT(*) AS n FROM sent_messages`)?.n), 0);
   db.close();
+});
+
+test('contradictory times on one date stay side by side as DATA CONFLICT', () => {
+  const card = planDesk(evidence({
+    name: 'Conflicted Tour',
+    facts: [
+      { field: 'showing_detail', value: 'date=9/20; time=4 PM; agent=Kyle Kleinman; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED', kind: 'fact', verification: 'unverified' },
+      { field: 'showing_detail_b', value: 'date=9/20; time=6 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED', kind: 'fact', verification: 'unverified' },
+    ],
+  }));
+  assert.match(card.showingConflict ?? '', /DATA CONFLICT on 9\/20/);
+  assert.match(card.showingLines.join('\n'), /Do not pick one/);
+  assert.ok(card.showingLines.some((line) => line.includes('4 PM Kyle Kleinman')));
+  assert.ok(card.showingLines.some((line) => line.includes('6 PM Larry Dix')));
+});
+
+test('a promise outranks a passive property check', () => {
+  const card = planDesk(evidence({
+    name: 'Promised',
+    facts: [
+      verified('property_address', '10 Fixture St'),
+      { field: 'kyle_promise', value: 'Send the plans today', kind: 'fact', verification: 'verified' },
+    ],
+  }));
+  assert.equal(card.tier, 'TIER 0');
+  assert.match(card.humanAction, /KEEP THE PROMISE/);
+  assert.match(card.whyNow, /Send the plans today/);
+});
+
+test('mark sent manually waits, suppresses the draft, and reranks', () => {
+  const db = tempDb();
+  const before = seedHot7(db, NOW);
+  const echo = before.cards.find((card) => card.clientName === 'Echo Niu');
+  assert.ok(echo?.clientDraft);
+  applyManualMark(db, { opportunityId: echo?.opportunityId ?? '', mark: 'sent_manually', now: NOW });
+  const after = buildMorningBrief(db, NOW);
+  const again = after.cards.find((card) => card.clientName === 'Echo Niu');
+  assert.ok(again);
+  assert.equal(again.clientDraft, null);
+  assert.equal(again.waitingOn, 'WAITING_ON_CLIENT');
+  assert.match(again.humanAction, /WAIT FOR ECHO NIU'S REPLY/);
+  assert.match(again.humanAction, /Delivery is not verified/);
+  assert.match(again.nextTrigger, /reply/i);
+  assert.ok(after.cards.findIndex((card) => card.clientName === 'Echo Niu') > 0);
+  assert.equal(Number(db.get(`SELECT COUNT(*) AS n FROM sent_messages`)?.n), 0);
+  db.close();
+});
+
+test('prompt modules stay versioned and the voice screen rejects the banned commission line', () => {
+  assert.equal(PROMPT_MODULE_VERSION, '2026-09-29.1');
+  assert.equal(screenKyleVoice('The seller pays my commission.').allowed, false);
+  assert.equal(screenKyleVoice('Echo, did you end up seeing the place?').allowed, true);
+  assert.ok(EVAL_SCENARIOS.includes('past showing unknown outcome'));
+  assert.ok(EVAL_SCENARIOS.includes('two tours are not a conflict'));
+});
+
+test('the production clock is America/New_York and tests inject the instant', () => {
+  const clock = easternClock(new Date('2026-09-23T14:00:00.000Z'));
+  assert.match(clock.date, /September 23, 2026/);
+  assert.match(clock.easternTime, /10:00 AM/);
 });
 
 test('buildMorningBrief regenerates from the database', () => {

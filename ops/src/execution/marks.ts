@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { recordCanonicalEvent } from '../canonical.ts';
 import { recordActivity } from '../conversion/activity.ts';
 import { confirmOfferSubmitted } from '../conversion/engine.ts';
@@ -64,6 +65,24 @@ export function applyManualMark(db: SqlDb, input: {
   }
   if (input.mark === 'offer_submitted') {
     confirmOfferSubmitted(db, { opportunityId: input.opportunityId, confirmation: 'kyle_confirmed', now });
+  }
+  if (input.mark === 'sent_manually') {
+    const value = `sent_manually; waiting=WAITING_ON_CLIENT; next_trigger=client reply; at=${now.toISOString()}`;
+    db.run(
+      `INSERT INTO client_facts (id, client_id, opportunity_id, field_key, value, kind, verification, source, observed_at, updated_at)
+       VALUES (?, ?, ?, 'execution_suppression', ?, 'fact', 'unverified', 'kyle_mark', ?, ?)
+       ON CONFLICT(client_id, field_key, kind) DO UPDATE SET
+         value = excluded.value,
+         opportunity_id = excluded.opportunity_id,
+         source = excluded.source,
+         updated_at = excluded.updated_at`,
+      randomUUID(),
+      clientId,
+      input.opportunityId,
+      value,
+      now.toISOString(),
+      now.toISOString(),
+    );
   }
   recordCanonicalEvent(db, {
     idempotencyKey: `manual-mark:${input.opportunityId}:${input.mark}:${now.toISOString()}`,

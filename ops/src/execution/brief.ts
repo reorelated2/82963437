@@ -3,6 +3,7 @@ import { nextBestAction } from '../conversion/engine.ts';
 import { text, type SqlDb } from '../sql.ts';
 import { integrationCapabilities, type IntegrationCapability } from './capabilities.ts';
 import { fridayReport, type FridayReport } from './friday.ts';
+import { productionNow } from '../time.ts';
 import { planDesk, renderMorningBrief, morningSections, easternClock, type BriefBucket, type DeskFact, type ExecutionCard } from './plan.ts';
 import { recordShowingTransition } from './showing.ts';
 
@@ -24,7 +25,7 @@ export interface MorningBrief {
   clock: { date: string; easternTime: string };
 }
 
-export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
+export function buildMorningBrief(db: SqlDb, now = productionNow()): MorningBrief {
   const rows = db.all(
     `SELECT o.id AS opportunity_id, o.client_id, o.primary_stage, o.original_lead_source, o.source_system,
             c.display_name, c.status AS client_status
@@ -113,7 +114,7 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
       postTour: ordered.filter((card) => card.showingState === 'OUTCOME_UNKNOWN').length,
       contactGaps: ordered.filter((card) => card.internalCode === 'needs_contact').length,
     },
-    sections: morningSections(ordered),
+    sections: morningSections(ordered, now),
     capabilities: integrationCapabilities(),
     friday: fridayReport(db, now),
     clock: easternClock(now),

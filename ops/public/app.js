@@ -168,9 +168,12 @@ function morningView() {
   for (const card of data.cards || []) {
     const box = el('article', { class: 'exec-card', id: card.anchor || '' });
     box.append(
-      el('h3', { text: `${card.priority}. ${card.clientName}` }),
+      el('h3', { text: `${card.tier ? `${card.tier} / ` : ''}${card.priority}. ${card.clientName}` }),
       el('p', { text: card.whyNow }),
     );
+    if (card.promise) box.append(el('p', { text: `PROMISE: ${card.promise}` }));
+    if (card.waitingOn) box.append(el('p', { text: `WAITING: ${card.waitingOn}. NEXT TRIGGER: ${card.nextTrigger || 'their reply'}` }));
+    if (card.workflowDrift) box.append(el('p', { class: 'rule', text: card.workflowDrift }));
     for (const line of card.showingLines || []) box.append(el('p', { text: line }));
     if (card.showingConflict) box.append(el('p', { class: 'rule', text: card.showingConflict }));
     box.append(el('p', { class: 'action', text: card.primaryAction || card.humanAction }));

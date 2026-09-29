@@ -49,6 +49,29 @@ function zoneOffset(date: Date, timeZone: string): number {
   return asUtc - date.getTime();
 }
 
+/** The one production clock. Tests pass a Date in. Production calls productionNow(). */
+export function productionNow(): Date {
+  return new Date();
+}
+
+export function easternClock(now: Date = productionNow()): { date: string; easternTime: string } {
+  return {
+    date: new Intl.DateTimeFormat('en-US', {
+      timeZone: ZONE,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(now),
+    easternTime: new Intl.DateTimeFormat('en-US', {
+      timeZone: ZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(now),
+  };
+}
+
 export function formatEt(date: Date): string {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: ZONE,

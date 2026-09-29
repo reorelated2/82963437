@@ -130,6 +130,7 @@ export const KYLE_VOICE_BANNED = [
   'dream home',
   'seamless process',
   'unique opportunity',
+  'the seller pays my commission',
 ];
 
 export function screenKyleVoice(body: string): { allowed: boolean; reason: string } {

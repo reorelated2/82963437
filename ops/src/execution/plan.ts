@@ -1,7 +1,10 @@
 import { scheduledTourIsStale, scheduledTourLanguage } from '../conversion/engine.ts';
 import { screenKyleVoice } from '../conversion/policy.ts';
+import { easternClock, zonedParts } from '../time.ts';
 import { offerSurface, transactionLine, transactionMilestones, type OfferSurface, type TransactionMilestone } from './modes.ts';
 import { SHOWING_STATES, type ShowingState } from './showing.ts';
+
+export { easternClock };
 
 export interface DeskFact {
   field: string;
@@ -66,6 +69,11 @@ export interface ExecutionCard {
   milestones: TransactionMilestone[];
   showingLines: string[];
   showingConflict: string | null;
+  tier: string;
+  waitingOn: string | null;
+  nextTrigger: string;
+  workflowDrift: string | null;
+  promise: string | null;
 }
 
 const URL_OK = /^https:\/\/[^\s]+$/i;
@@ -106,7 +114,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     hotScore: Number.isFinite(hotScore) ? hotScore : 0,
   };
 
-  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
+  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict' | 'tier' | 'waitingOn' | 'nextTrigger' | 'workflowDrift' | 'promise'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
     const full = { ...card, manualActionRequired: true as const, approvalRequired: true as const, live: false as const } as ExecutionCard;
     for (const draft of [full.clientDraft, full.callOpening, full.emailDraft]) {
       if (!draft) continue;
@@ -162,9 +170,39 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     const showing = collectShowingLines(input.facts);
     full.showingLines = showing.lines;
     full.showingConflict = showing.conflict;
-    if (showing.conflict && !/SHOWING CONFLICT/.test(full.whyNow)) {
-      full.whyNow = `${full.whyNow} ${showing.conflict}`;
+    const promise = verified('kyle_promise') ?? any('kyle_promise');
+    full.promise = promise && !/kept|done/i.test(promise) ? promise : null;
+    if (full.promise) {
+      full.priority = Math.max(full.priority, 94);
+      full.whyNow = `Kyle promised: ${full.promise}. ${full.whyNow}`;
+      if (!/KEEP THE PROMISE/.test(full.humanAction)) {
+        full.humanAction = `KEEP THE PROMISE. ${full.promise}. ${full.humanAction}`;
+      }
+    } else {
+      full.promise = null;
     }
+    const suppression = any('execution_suppression');
+    if (suppression && /sent_manually/.test(suppression) && /^(TEXT|EMAIL) /.test(full.humanAction)) {
+      full.waitingOn = 'WAITING_ON_CLIENT';
+      full.clientDraft = null;
+      full.emailDraft = null;
+      full.priority = Math.min(full.priority, 70);
+      full.humanAction = `WAIT FOR ${input.name.toUpperCase()}'S REPLY. Kyle marked the message sent manually. Delivery is not verified. NEXT TRIGGER: their reply. Do not send another message yet.`;
+      full.followUp = 'Their reply. If none comes, use the follow-up date already on the card.';
+    }
+    if (showingFallsToday(full.showingLines, input.now) && full.showingState === 'ACCESS_PENDING') {
+      full.priority = Math.max(full.priority, 97);
+      if (!/SHOWING TODAY/.test(full.whyNow)) full.whyNow = `SHOWING TODAY. ${full.whyNow}`;
+    }
+    if (!full.humanAction.trim() || /^follow up with\b/i.test(full.humanAction)) {
+      full.workflowDrift = `WORKFLOW DRIFT: ${input.name} has no next action, waiting condition, or future trigger.`;
+      full.humanAction = `WORKFLOW DRIFT. CALL ${input.name.toUpperCase()} / WHY: this opportunity has no next action. OBJECTIVE: name the next real step.`;
+    } else {
+      full.workflowDrift = null;
+    }
+    full.waitingOn = full.waitingOn ?? (/^WAIT /.test(full.humanAction) ? 'WAITING_ON_CLIENT' : null);
+    full.nextTrigger = full.followUp;
+    full.tier = tierFor(full);
     const splitAt = full.internalCode === 'cma_needed' ? full.humanAction.indexOf('CMA NEEDED') : 0;
     if (splitAt > 0) {
       full.primaryAction = full.humanAction.slice(splitAt);
@@ -1416,19 +1454,60 @@ const SHOWING_MONTHS: Record<string, number> = {
 };
 
 function collectShowingLines(facts: DeskFact[]): { lines: string[]; conflict: string | null } {
-  const lines: string[] = [];
-  const dates: string[] = [];
+  const records: Array<{ date: string; time: string; agent: string; text: string }> = [];
   for (const fact of facts) {
     if (!isShowingFact(fact)) continue;
     const line = formatShowingLine(fact);
-    if (!line || lines.includes(line.text)) continue;
-    lines.push(line.text);
-    if (line.date !== 'DATA NEEDED' && !dates.includes(line.date)) dates.push(line.date);
+    if (!line || records.some((row) => row.text === line.text)) continue;
+    records.push(line);
   }
-  const conflict = dates.length > 1
-    ? `SHOWING CONFLICT: ${dates.join(' and ')} are both on file. Do not pick one. Outcome is not confirmed.`
-    : null;
-  return { lines, conflict };
+  const byDate = new Map<string, typeof records>();
+  for (const record of records) {
+    const group = byDate.get(record.date) ?? [];
+    group.push(record);
+    byDate.set(record.date, group);
+  }
+  const lines: string[] = [];
+  const conflicts: string[] = [];
+  for (const [date, group] of byDate) {
+    const times = concrete(group.map((row) => row.time));
+    const agents = concrete(group.map((row) => row.agent));
+    const contradictory = times.length > 1 || agents.length > 1;
+    if (contradictory) {
+      const note = `DATA CONFLICT on ${date}. The lines disagree. Both stay. Do not pick one.`;
+      conflicts.push(note);
+      lines.push(note);
+    } else if (group.length > 1) {
+      lines.push(`TOUR ${date}, outcome not confirmed. Possible duplicate. Both lines stay. They were not merged.`);
+    } else {
+      lines.push(`TOUR ${date}, outcome not confirmed.`);
+    }
+    for (const row of group) lines.push(row.text);
+  }
+  return { lines, conflict: conflicts.length ? conflicts.join(' ') : null };
+}
+
+function concrete(values: string[]): string[] {
+  const found: string[] = [];
+  for (const value of values) {
+    if (!value || value === 'DATA NEEDED') continue;
+    if (!found.includes(value)) found.push(value);
+  }
+  return found;
+}
+
+function showingFallsToday(lines: string[], now: Date): boolean {
+  const parts = zonedParts(now);
+  const label = `${parts.month}/${parts.day}`;
+  return lines.some((line) => line.startsWith(`${label} `) || line.startsWith(`TOUR ${label},`) || line.startsWith(`TOUR ${label} `));
+}
+
+function tierFor(card: { priority: number; showingState: string; internalCode: string; promise: string | null; whyNow: string }): string {
+  if (card.promise || card.showingState === 'OUTCOME_UNKNOWN' || /SHOWING TODAY/.test(card.whyNow)) return 'TIER 0';
+  if (/offer request/i.test(card.whyNow) || /offer_request|offer_submitted|effective_date|under_contract/.test(card.internalCode) || card.priority >= 90) return 'TIER 0';
+  if (/needs_preapproval|cma_needed|sale_dependency|listing_agent_missing|needs_contact/.test(card.internalCode)) return 'TIER 1';
+  if (card.priority >= 55) return 'TIER 2';
+  return 'TIER 3';
 }
 
 function isShowingFact(fact: DeskFact): boolean {
@@ -1439,7 +1518,7 @@ function isShowingFact(fact: DeskFact): boolean {
   return /upcoming tour|tour agent scheduled|scheduled tour|\btour\b|showing/i.test(fact.value);
 }
 
-function formatShowingLine(fact: DeskFact): { text: string; date: string } | null {
+function formatShowingLine(fact: DeskFact): { text: string; date: string; time: string; agent: string } | null {
   const structured = parseStructuredShowing(fact.value);
   const date = structured?.date || proseDate(fact.value) || 'DATA NEEDED';
   const time = structured?.time || proseTime(fact.value) || 'DATA NEEDED';
@@ -1449,6 +1528,8 @@ function formatShowingLine(fact: DeskFact): { text: string; date: string } | nul
   if (date === 'DATA NEEDED' && time === 'DATA NEEDED' && agent === 'DATA NEEDED') return null;
   return {
     date,
+    time,
+    agent,
     text: `${date} ${time} ${agent} showing, ${outcome}. Evidence: ${evidence}.`,
   };
 }
@@ -1617,7 +1698,7 @@ function bucket(label: string, cards: ExecutionCard[], include: (card: Execution
   return { label, count: hits.length, links: hits.map((card) => ({ name: card.clientName, anchor: card.anchor })) };
 }
 
-export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]; summary: BriefBucket[] } {
+export function morningSections(cards: ExecutionCard[], now: Date): { header: BriefBucket[]; summary: BriefBucket[] } {
   const missing = (card: ExecutionCard) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction);
   const postTour = (card: ExecutionCard) => card.showingState === 'OUTCOME_UNKNOWN';
   const offers = (card: ExecutionCard) => card.internalCode.startsWith('offer_')
@@ -1625,7 +1706,7 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     || (/offer request/i.test(`${card.whyNow} ${card.agentToolsNote}`) && !/No offer request is on file/i.test(card.offerReadiness.nextAction));
   const header: BriefBucket[] = [
     bucket('Actionable clients', cards, (card) => card.internalCode !== 'do_not_contact'),
-    bucket('Showings today', cards, (card) => card.showingState === 'ACCESS_PENDING'),
+    bucket('Showings today', cards, (card) => showingFallsToday(card.showingLines, now) && card.showingState !== 'OUTCOME_UNKNOWN'),
     bucket('Showings requiring confirmation', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
     bucket('Hot post-tour clients', cards, postTour),
     bucket('Offers or offer requests', cards, offers),
@@ -1636,7 +1717,7 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     bucket('Agent Tools records needing updates', cards, (card) => card.internalCode !== 'do_not_contact'),
     bucket('Missing contact info', cards, missing),
     bucket('Overdue actions', cards, (card) => card.internalCode === 'cma_needed' || /overdue/i.test(`${card.whyNow} ${card.humanAction}`)),
-    bucket('Waiting on client', cards, postTour),
+    bucket('Waiting on client', cards, (card) => card.waitingOn === 'WAITING_ON_CLIENT'),
     bucket('Waiting on listing side', cards, (card) => card.internalCode === 'listing_agent_missing'),
   ];
   const summary: BriefBucket[] = [
@@ -1645,7 +1726,7 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     bucket('EMAILS TO SEND', cards, (card) => Boolean(card.emailDraft)),
     bucket('LISTING AGENTS TO CONTACT', cards, (card) => card.internalCode === 'listing_agent_missing'),
     bucket('SHOWINGS TO CONFIRM', cards, (card) => card.showingState === 'CUSTOMER_REQUESTED' || card.showingState === 'ACCESS_PENDING'),
-    bucket('SHOWINGS TODAY', cards, (card) => card.showingState === 'ACCESS_PENDING'),
+    bucket('SHOWINGS TODAY', cards, (card) => showingFallsToday(card.showingLines, now) && card.showingState !== 'OUTCOME_UNKNOWN'),
     bucket('POST TOUR FOLLOW UPS', cards, postTour),
     bucket('FINANCING ITEMS', cards, (card) => card.internalCode === 'needs_preapproval'),
     bucket('BUY AFTER SELL ITEMS', cards, (card) => card.internalCode === 'sale_dependency' || card.internalCode === 'cma_needed'),
@@ -1654,7 +1735,7 @@ export function morningSections(cards: ExecutionCard[]): { header: BriefBucket[]
     bucket('UNDER CONTRACT ITEMS', cards, (card) => card.internalCode === 'effective_date' || /under contract/i.test(card.customerPropertyState)),
     bucket('CONTACT INFORMATION TO FIND', cards, missing),
     bucket('AGENT TOOLS UPDATES', cards, (card) => card.internalCode !== 'do_not_contact'),
-    bucket('WAITING ON CLIENT', cards, postTour),
+    bucket('WAITING ON CLIENT', cards, (card) => card.waitingOn === 'WAITING_ON_CLIENT'),
     bucket('WAITING ON LISTING SIDE', cards, (card) => card.internalCode === 'listing_agent_missing'),
     bucket('OVERDUE ACTIONS', cards, (card) => card.internalCode === 'cma_needed' || /overdue/i.test(`${card.whyNow} ${card.humanAction}`)),
   ];
@@ -1666,28 +1747,10 @@ function bucketLine(item: BriefBucket): string {
   return `${item.label}: ${item.count} ${item.links.map((link) => `${link.name} (#${link.anchor})`).join(', ')}`;
 }
 
-export function easternClock(now: Date): { date: string; easternTime: string } {
-  return {
-    date: new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    }).format(now),
-    easternTime: new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).format(now),
-  };
-}
-
 export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
   const clock = easternClock(now);
   const ordered = [...cards];
-  const sections = morningSections(ordered);
+  const sections = morningSections(ordered, now);
   const lines = [
     'KYLEOS MORNING BRIEF',
     `Date: ${clock.date}`,
@@ -1699,14 +1762,17 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
   ordered.forEach((card, index) => {
     lines.push(
       '',
-      `PRIORITY ${index + 1} / ${card.clientName.toUpperCase()}`,
+      `${card.tier} / PRIORITY ${index + 1} / ${card.clientName.toUpperCase()}`,
       `WHY NOW: ${card.whyNow}`,
       `STAGE: ${card.clientStage}`,
       `PROPERTY: ${card.propertyAddress ?? 'DATA NEEDED'}`,
       `PROPERTY STATUS: ${card.propertyStatus}`,
       `SHOWING: ${card.showingState}`,
       ...(card.showingLines.length ? card.showingLines : ['SHOWING DETAIL: none on file']),
-      card.showingConflict ?? 'SHOWING CONFLICT: none',
+      ...(card.showingConflict ? [card.showingConflict] : []),
+      ...(card.promise ? [`PROMISE: ${card.promise}`] : []),
+      ...(card.waitingOn ? [`WAITING: ${card.waitingOn}`] : []),
+      ...(card.workflowDrift ? [card.workflowDrift] : []),
       `DO THIS: ${card.primaryAction}`,
       card.secondaryActions.length ? `THEN: ${card.secondaryActions.join(' ')}` : 'THEN: none',
       card.searchPlan.mode === 'none' ? 'SEARCH: none on file' : `SEARCH: ${card.searchPlan.mode.toUpperCase()}. REQUIRED: ${card.searchPlan.required}. PREFERRED: ${card.searchPlan.preferred}. DO NOT FILTER OUT YET: ${card.searchPlan.doNotFilter}`,
