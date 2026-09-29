@@ -1,0 +1,9 @@
+{
+  "name": "parts-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-sqlite src/server.mjs",
+    "test": "node --experimental-sqlite --test test/engine.test.mjs"
+  }
+}
