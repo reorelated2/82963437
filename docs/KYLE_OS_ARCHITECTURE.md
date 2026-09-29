@@ -171,7 +171,7 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch after the tour-first next-best-action rule: typecheck passed. `npm test` reported 102 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+2026-09-29 result on this branch after the execution desk: typecheck passed. `npm test` reported 110 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
 
 ## 9. Audit after `main` was merged
 
@@ -192,4 +192,12 @@ Checked on 2026-09-29 against this branch, which now contains both `ops/` and th
 
 The contract is `docs/AGENT_TOOLS_INGESTION.md`. The loader is `ops/src/ingest/agentTools.ts`. It reuses `ingestCanonicalLead`, identity flags, workflow locks, and the conversion engine. A record with no verified phone or email becomes a client with status `pending_enrichment` and is not dropped. Matches use verified email, verified phone, and Agent Tools source id. A household id or a display name flags a review and does not merge. Files with more than 8 records are refused unless `onlyRecordId` names one lead.
 
-The real 28-record export (26 leads and 2 `needs_review`) is not in this repo. `ops/fixtures/agent-tools-leads.sample.json` is a 4-record synthetic file with the same shape. Nothing in this loader calls Agent Tools or sends a message.
+The real 28-record export (26 leads and 2 `needs_review`) is not in this repo. `ops/fixtures/agent-tools-leads.sample.json` is a 4-record synthetic file with the same shape. Nothing in this loader calls Agent Tools or sends a message. After a record is applied, `recordLeadSource` stores `source_system` as `redfin_agent_tools` and appends `lead_source_history`. That does not overwrite `original_lead_source` or `source_label`.
+
+## 11. Execution desk
+
+`ops/src/execution/` is a planner on top of the existing conversion engine, approval queue, and canonical facts. It is not a second CRM. Reason codes stay on `next_best_actions`. Kyle sees `humanAction` on the Morning brief in the existing `ops/public` desk (`#/morning`).
+
+`planDesk` reads verified facts and refuses to promote an inference. A past dated tour becomes POST TOUR VERIFICATION NEEDED / OUTCOME UNKNOWN. An associate or coordinator note stays SHOWING OUTCOME NOT CONFIRMED. Drafts pass `screenKyleVoice` (no em dashes, no banned phrases). Each draft is also enqueued with `enqueueApproval` as `manual_action` / `execution_desk` and stays PENDING. COPY copies text. OPEN opens a link only when the card status is `verified` and the URL is `https`. MARK calls `applyManualMark`, which writes a canonical `manual_mark` event and never a sent message or an Agent Tools write.
+
+The Hot 7 regression fixture is synthetic (`ops/src/execution/hot7.ts`). Phones are `3055552101` through `3055552103`. Emails are `*.fixture@example.com`. Claudia is labeled `hot7-claudia-not-in-export` because she is not in the runtime export. No Redfin or Agent Tools URL is invented. Missing links render as LINK NOT FOUND.

@@ -10,6 +10,9 @@ import { clearCookieHeader, cookieHeader, login, sessionValid } from './auth.ts'
 import { openDatabase } from './db.ts';
 import { decodeImage, readScreenshot } from './ocr.ts';
 import type { SqlDb } from './sql.ts';
+import { buildMorningBrief } from './execution/brief.ts';
+import { seedHot7 } from './execution/hot7.ts';
+import { applyManualMark } from './execution/marks.ts';
 import {
   acknowledgeJob,
   approveReview,
@@ -195,6 +198,18 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
     });
     res.end(JSON.stringify(exportRecords(db), null, 2));
     return;
+  }
+  if (method === 'GET' && path === '/api/execution/brief') {
+    return sendJson(res, 200, buildMorningBrief(db));
+  }
+  if (method === 'POST' && path === '/api/execution/hot7') {
+    return sendJson(res, 200, seedHot7(db));
+  }
+  if (method === 'POST' && path === '/api/execution/mark') {
+    const body = await readJson(req);
+    const opportunityId = typeof body.opportunityId === 'string' ? body.opportunityId : '';
+    const mark = typeof body.mark === 'string' ? body.mark : '';
+    return sendJson(res, 200, applyManualMark(db, { opportunityId, mark }));
   }
   if (method === 'GET' && path === '/api/backup') return sendBackup(res, dbPath);
   if (method === 'GET') return sendStatic(res, path);

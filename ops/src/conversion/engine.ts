@@ -853,7 +853,7 @@ const TOUR_RECENT_MS = 14 * 24 * 60 * 60 * 1000;
 
 interface TourChoice {
   actionType: 'confirm_tour_details' | 'respond_to_tour_request' | 'tour_follow_up';
-  tourState: 'scheduled' | 'requested' | 'unverified';
+  tourState: 'scheduled' | 'requested' | 'unverified' | 'outcome_unknown';
   score: number;
   bucket: PriorityBucket;
   reason: string;
@@ -941,6 +941,26 @@ function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
   }
 
   const guard = 'The signal does not confirm the tour, complete it, or make the file offer ready.';
+  if (scheduled && scheduledTourIsStale(scheduled, now)) {
+    const reasons = [
+      'A past scheduled tour has no verified outcome. Post tour verification is needed.',
+      'This is not a current upcoming tour, a confirmed showing, or a completed showing.',
+    ];
+    if (coordinator) reasons.push('A coordinator or showing-agent tour is not a tour with Kyle.');
+    else reasons.push(guard);
+    return {
+      actionType: 'tour_follow_up',
+      tourState: 'outcome_unknown',
+      score: 86,
+      bucket: 'TODAY',
+      reason: 'Post tour verification needed. The outcome is unknown.',
+      reasons,
+      evidence: [`outcome unknown: ${clip(scheduled)}`],
+      readinessEvidence: 'POST TOUR VERIFICATION NEEDED. OUTCOME UNKNOWN. Not confirmed and not completed.',
+      followUpTrigger: 'tour_outcome',
+      confidence: 'medium',
+    };
+  }
   if (scheduled) {
     const reasons = [
       'A tour is scheduled and still unconfirmed. Verify the date, time, address, and who is showing.',
@@ -1073,6 +1093,39 @@ function syncIntakeSecondary(db: SqlDb, opp: Opp, stage: string, tour: TourChoic
     ...params,
     now.toISOString(),
   );
+}
+
+function scheduledTourIsStale(value: string, now: Date): boolean {
+  const timed = value.match(/\b(20\d{2}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
+  if (timed?.[1] && timed[2] && timed[3]) {
+    let hour = Number(timed[2]);
+    const minute = Number(timed[3]);
+    const mer = (timed[4] ?? '').toLowerCase();
+    if (mer === 'pm' && hour < 12) hour += 12;
+    if (mer === 'am' && hour === 12) hour = 0;
+    const instant = Date.parse(`${timed[1]}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00.000Z`);
+    return !Number.isNaN(instant) && instant < now.getTime();
+  }
+  const day = explicitTourMoment(value, now);
+  if (day === null) return false;
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return day < today;
+}
+
+function explicitTourMoment(value: string, now: Date): number | null {
+  const iso = value.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso?.[1]) {
+    const parsed = Date.parse(`${iso[1]}T00:00:00.000Z`);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  const month = value.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b/i);
+  if (month?.[1] && month[2]) {
+    const names = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const index = names.indexOf(month[1].toLowerCase().slice(0, 3));
+    const day = Number(month[2]);
+    if (index >= 0 && day >= 1 && day <= 31) return Date.UTC(now.getUTCFullYear(), index, day);
+  }
+  return null;
 }
 
 function scheduledTourLanguage(field: string, value: string): boolean {
