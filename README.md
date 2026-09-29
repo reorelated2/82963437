@@ -24,15 +24,23 @@ npm start
 node --experimental-strip-types --experimental-sqlite --test test/*.ts
 ```
 
-Latest result on 2026-09-27: typecheck passed. `npm test` reported 30 passed, 0 failed.
+Latest full-suite result after merging `main`, 2026-09-29: typecheck passed. `npm test` reported 52 passed, 0 failed. The lead-workflow file alone was 30 passed before that merge.
 
 Then open `http://127.0.0.1:8787`. Sign in with the local password from [Setup](docs/SETUP.md). The default is `local-kyle`. Click **Load sample day** to see the board. Screenshot of that synthetic board: [docs/screenshots/command-board.png](docs/screenshots/command-board.png).
 
 Still blocked: Redfin write-back, MLS, ShowingTime, live Quo SMS, Gmail import, and Spanish drafts. Details are in [Project status](docs/PROJECT_STATUS.md).
 
-# Older scaffold
+# South Florida Buyer Command Center
 
-The rest of this repository is an earlier South Florida Buyer Command Center (Expo + Node + Playwright). It is not the operating system. Do not use its scripted strategy copy for client messages. The lead desk voice lives in `ops/src/voice.ts`.
+This repository also contains the consult, market, and MLS-helper app. That app is not the inquiry command board.
+
+The inquiry board is `ops/` on port 8787. The Buyer Command Center server on port 8080 does not mount `backend/src/os`. Leave `ENABLE_LEAD_DESK` unset. The boundary note is [docs/HANDOFF_BOUNDARY.md](docs/HANDOFF_BOUNDARY.md).
+
+```bash
+cd backend && npm install && npm run dev
+```
+
+Open `http://127.0.0.1:8080`. Expect a JSON description of this product, not a CRM board. `GET /mls/hiram-zone` is a labeled DEMO seed. Nothing on this server sends a client message.
 
 # South Florida Buyer Command Center (Expo + Node + Playwright)
 

@@ -1,9 +1,16 @@
 node_modules/
+dist/
+backend/data/
 ops/data/*.sqlite
 ops/data/*.sqlite-*
 ops/data/uploads/
 ops/data/backups/
 ops/data/*.png
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.log
 .env
 .env.*
+!.env.example
+.DS_Store

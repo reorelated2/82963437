@@ -1,10 +1,10 @@
 # Backlog
 
-Owner for the next build is Cursor. Grok reviews acceptance. Do not start the next module until the lead desk checks in `docs/TEST_RESULTS.md` still pass.
+Owner for the next KyleOS build is Cursor. Grok reviews acceptance. Do not start the next module until the lead desk checks in `docs/TEST_RESULTS.md` still pass.
 
 ## Now
 
-1. Lead desk: paste, screenshot, review, draft, note, follow up. In progress in this release.
+1. Lead desk in `ops/`: paste, screenshot, review, draft, note, follow up. In progress on this branch.
 
 ## Next, in business order
 
@@ -22,3 +22,20 @@ Owner for the next build is Cursor. Grok reviews acceptance. Do not start the ne
 - Buying a CRM, an AI API plan, or a hosting plan.
 - Scraping Redfin or connecting `mail.php` from the old seller site.
 - Importing Gmail, employer mail, or any other inbox without a permitted data flow.
+- Importing Redfin mail, MLS data, or other employer records until Kyle confirms that specific export is allowed.
+
+## Consult app queue
+
+The Buyer Command Center on `main` tracks the same business order with a different owner note. Stage 1 for KyleOS is `ops/` in this repository. The consult server does not mount `backend/src/os`. See `docs/TASK_QUEUE.md`.
+
+| Order | Module | Purpose | State |
+| --- | --- | --- | --- |
+| 0 | New lead to follow up | SEND, NOTE, NEXT, match, opt-out, source history, daily screen | Built in `ops/` on this branch. See `docs/TEST_RESULTS.md`. |
+| 1 | Contacts and reactivation | Import only allowed files, preview, duplicates, consent, stop rules | Not started |
+| 2 | Buyer qualification and showings | Budget, timing, financing, next question, showing brief, feedback | Not started |
+| 3 | Property matching | Authorized MLS export or a listing Kyle supplies. No invented availability | Blocked on MLS access |
+| 4 | CMA and seller prep | Comps, adjustments, scenarios, why each comp is in or out | Not started |
+| 5 | Investor analysis | Rent, small multifamily, renovation. Facts separate from assumptions | Not started |
+| 6 | Offers and transactions | Term summaries and deadlines tied to a source clause. Review before dates go live | Not started |
+| 7 | Marketing | Drafts from verified facts. Public words stay apart from private notes | Not started |
+| 8 | Performance | Response time, conversations, booked vs held, offers, contracts, closings, forecast vs received | Not started |
