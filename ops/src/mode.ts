@@ -25,3 +25,25 @@ export function sendFlags(): SendFlags {
     aiCalling: false,
   };
 }
+
+export type ReleaseChannel = 'sms' | 'email' | 'voice' | 'calendar';
+
+/**
+ * True only when the process is in LIVE mode and the matching channel flag is
+ * the string "true". This build still returns false after that check, because
+ * no live transport is implemented.
+ */
+export function liveChannelPermitted(channel: ReleaseChannel): false {
+  const modeAllows = systemMode() === 'LIVE';
+  const flag = channelFlag(channel);
+  const flagAllows = flag === 'true';
+  if (!modeAllows || !flagAllows) return false;
+  return false;
+}
+
+function channelFlag(channel: ReleaseChannel): string | undefined {
+  if (channel === 'sms') return process.env.SMS_SEND;
+  if (channel === 'email') return process.env.EMAIL_SEND;
+  if (channel === 'voice') return process.env.AI_CALLING;
+  return process.env.CALENDAR_WRITE;
+}

@@ -104,6 +104,20 @@ Migration `2026-09-29-canonical-clients` runs from `openDatabase`.
 
 Tests covering this live in `ops/test/canonical.test.ts`.
 
+## 7b. What Phase 2 implemented
+
+Migration `2026-09-29-communication` adds `consent` and `communication_log` on the same desk file.
+
+Business code in `ops/src/comms/gateway.ts` calls `MessagingProvider`, `VoiceProvider`, `EmailProvider`, and `CalendarProvider` only. Synthetic adapters record `simulated` receipts with `live: false`. Twilio SMS, Twilio Voice, Quo, Gmail, and Vapi are shells. They return `not_attempted` and do not open a network connection. `liveChannelPermitted` is false even if `SYSTEM_MODE=LIVE` and the channel flag is `true`.
+
+Consent stores sms, call, email, marketing, and recording state, `do_not_*` flags, `opt_out_at`, `wrong_number`, preferred channel and time, and `source_of_consent`. An inbound `STOP` or `UNSUBSCRIBE` suppresses that channel before any later outbound call.
+
+Inbound SMS and calls append to the Phase 1 `events` table with the caller's idempotency key. A repeat does not add a second event. Outbound attempts reuse `workflow_locks` (`outreach:<purpose>`) and stop a second simulated contact for the same purpose inside 24 hours.
+
+A failed or unavailable provider is stored as `failed` with `retryable` and `retry_after_seconds`. The log rejects statuses `sent` and `call completed`.
+
+Tests: `ops/test/comms.test.ts`.
+
 ## 8. Integrations that need credentials
 
 None of these were called in this run. None should be treated as connected.
@@ -113,12 +127,12 @@ None of these were called in this run. None should be treated as connected.
 | Redfin Partner Tools write-back | No public write API is connected. Kyle pastes the CRM note. |
 | MLS / IDX | No credentials. Listing status is not invented. |
 | ShowingTime | No API. Requested is not confirmed. |
-| Quo SMS | Not used. `SMS_SEND` stays false. |
-| Gmail send and mailbox import | Not used. `EMAIL_SEND` stays false. |
-| Voice calling (Vapi or otherwise) | No client. `AI_CALLING` stays false. |
+| Quo SMS | Shell only. No API key. `SMS_SEND` does not send. |
+| Gmail send and mailbox import | Shell only. No OAuth client. `EMAIL_SEND` does not send. |
+| Twilio SMS and Voice | Shells only. No account SID. |
+| Vapi calling | Shell only. No API key. `AI_CALLING` does not place a call. |
 | Supabase | URL and service role are unset. Not required for the desk. |
 | OpenAI | `OPENAI_API_KEY` is unset. The desk does not call it. |
-| Twilio | Not integrated. |
 
 ## Tests
 
@@ -128,4 +142,4 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch: typecheck passed. `npm test` reported 63 passed, 0 failed. Sends in the buyer suite remain synthetic. `sent_messages` stays empty on the new lead path.
+2026-09-29 result on this branch: typecheck passed. `npm test` reported 72 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. `sent_messages` stays empty.

@@ -862,6 +862,32 @@ function ensureOpenOpportunity(db: SqlDb, input: {
   return id;
 }
 
+export function recordCanonicalEvent(db: SqlDb, input: {
+  idempotencyKey: string;
+  clientId: string | null;
+  opportunityId: string | null;
+  contactId?: string | null;
+  kind: string;
+  payload: unknown;
+  isDemo?: boolean;
+  now?: Date;
+}): { eventId: string; duplicate: boolean } {
+  const key = input.idempotencyKey.trim();
+  const prior = db.get(`SELECT id FROM events WHERE idempotency_key = ?`, key);
+  if (prior) return { eventId: text(prior, 'id'), duplicate: true };
+  const eventId = insertEvent(db, {
+    idempotencyKey: key,
+    clientId: input.clientId,
+    opportunityId: input.opportunityId,
+    contactId: input.contactId ?? null,
+    kind: input.kind,
+    payload: input.payload,
+    isDemo: Boolean(input.isDemo),
+    now: input.now ?? new Date(),
+  });
+  return { eventId, duplicate: false };
+}
+
 function insertEvent(db: SqlDb, input: {
   idempotencyKey: string;
   clientId: string | null;
