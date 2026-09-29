@@ -485,6 +485,7 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
   let approval = true;
   let confidence: NextBestAction['confidence'] = 'medium';
   const reasons: string[] = [];
+  let tourChoice: TourChoice | null = null;
   if (stage === 'DO_NOT_CONTACT' || text(opp, 'no_action_reason') === 'DO_NOT_CONTACT') {
     bucket = 'DO_NOT_CONTACT';
     score = 0;
@@ -556,14 +557,25 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     actionType = 'nurture_hold';
     reason = 'Keep the file in nurture until a confirmed fact changes.';
     reasons.push('Stage is nurture.');
-  } else if (stage === 'NEW_INQUIRY' || stage === 'QUALIFYING') {
-    bucket = 'TODAY';
-    score = stage === 'NEW_INQUIRY' ? 70 : 60;
-    actionType = 'ask_next_question';
-    reason = text(opp, 'next_action') || 'Ask the single next intake question.';
-    reasons.push('Intake still has an open question or a fresh inquiry.');
   } else {
-    reasons.push(`Stage ${stage} has no hotter trigger.`);
+    tourChoice = detectTourSignal(db, opp, now);
+    if (tourChoice) {
+      bucket = tourChoice.bucket;
+      score = tourChoice.score;
+      actionType = tourChoice.actionType;
+      reason = tourChoice.reason;
+      confidence = tourChoice.confidence;
+      reasons.push(...tourChoice.reasons);
+      evidence.push(...tourChoice.evidence);
+    } else if (stage === 'NEW_INQUIRY' || stage === 'QUALIFYING') {
+      bucket = 'TODAY';
+      score = stage === 'NEW_INQUIRY' ? 70 : 60;
+      actionType = 'ask_next_question';
+      reason = text(opp, 'next_action') || 'Ask the single next intake question.';
+      reasons.push('Intake still has an open question or a fresh inquiry.');
+    } else {
+      reasons.push(`Stage ${stage} has no hotter trigger.`);
+    }
   }
   if (reasons.length === 0) reasons.push('No hotter trigger was found.');
   const action: NextBestAction = {
@@ -579,7 +591,7 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     deadline: text(opp, 'next_action_due_at') || null,
     expected_outcome: execution === 'kyle_handoff' ? 'Kyle decides the next human step.' : 'One draft or question is ready. Nothing is sent.',
     failure_action: 'Leave the prior confirmed facts in place and ask Kyle.',
-    follow_up_trigger: text(opp, 'follow_up_trigger') || null,
+    follow_up_trigger: tourChoice?.followUpTrigger ?? (text(opp, 'follow_up_trigger') || null),
     priority_score: score,
     priority_bucket: bucket,
     priority_reasons: reasons.slice(0, 3),
@@ -628,6 +640,10 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
       now.toISOString(),
     );
   }
+  if (tourChoice) {
+    markReadiness(db, opp.id, 'tour', tourChoice.tourState, tourChoice.readinessEvidence, now);
+  }
+  syncIntakeSecondary(db, opp, stage, tourChoice, now);
   return action;
 }
 
@@ -831,6 +847,278 @@ function writeHandoff(db: SqlDb, opp: Opp, reason: string, level: number, summar
     now,
   });
   return { id };
+}
+
+const TOUR_RECENT_MS = 14 * 24 * 60 * 60 * 1000;
+
+interface TourChoice {
+  actionType: 'confirm_tour_details' | 'respond_to_tour_request' | 'tour_follow_up';
+  tourState: 'scheduled' | 'requested' | 'unverified';
+  score: number;
+  bucket: PriorityBucket;
+  reason: string;
+  reasons: string[];
+  evidence: string[];
+  readinessEvidence: string;
+  followUpTrigger: string;
+  confidence: NextBestAction['confidence'];
+}
+
+function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
+  const facts = db.all(
+    `SELECT field_key, value, kind, verification, observed_at FROM client_facts WHERE client_id = ?`,
+    opp.clientId,
+  );
+  const activities = db.all(
+    `SELECT kind, actor, state, verified, note FROM activity_log WHERE opportunity_id = ?`,
+    opp.id,
+  );
+  const events = db.all(
+    `SELECT kind, payload_json FROM events WHERE opportunity_id = ?`,
+    opp.id,
+  );
+  const kyleVerified = activities.some((row) => {
+    const kind = text(row, 'kind');
+    return (kind === 'showing_confirmed' || kind === 'event_completed')
+      && Number(row.verified) === 1
+      && /^kyle(\s+kleinman)?$/i.test(text(row, 'actor'));
+  });
+  if (kyleVerified) return null;
+
+  let scheduled = '';
+  let requested = '';
+  let zeroCompleted = false;
+  let coordinator = false;
+  let recentInference = '';
+  let inferenceHappened = false;
+
+  for (const row of facts) {
+    const field = text(row, 'field_key');
+    const value = text(row, 'value');
+    const kind = text(row, 'kind');
+    const verification = text(row, 'verification');
+    const verifiedFact = kind === 'fact' && verification === 'verified';
+    if (field === 'tours_completed' && /^0+(\.0+)?$/.test(value.trim())) zeroCompleted = true;
+    if (/coordinator|showing agent/i.test(value)) coordinator = true;
+    if (verifiedFact && scheduledTourLanguage(field, value)) {
+      scheduled = `${field}: ${value}`;
+      continue;
+    }
+    if (tourRequestLanguage(field, value)) {
+      requested = requested || `${field}: ${value}`;
+      continue;
+    }
+    if ((kind === 'inference' || verification !== 'verified') && mentionsTour(field, value)) {
+      const moment = tourMoment(value, text(row, 'observed_at'), now);
+      if (moment !== null && Math.abs(now.getTime() - moment) <= TOUR_RECENT_MS) {
+        recentInference = `${field}: ${value}`;
+        if (claimsTourHappened(value)) inferenceHappened = true;
+      }
+    }
+  }
+
+  for (const row of activities) {
+    const kind = text(row, 'kind');
+    const state = text(row, 'state');
+    const note = text(row, 'note');
+    const actor = text(row, 'actor');
+    if (/coordinator|showing agent/i.test(`${actor} ${note}`)) coordinator = true;
+    if (kind === 'event_scheduled' && state === 'scheduled') {
+      scheduled = scheduled || `Activity event_scheduled is scheduled only. ${note}`.trim();
+    }
+    if (kind === 'showing_requested' || state === 'requested') {
+      requested = requested || `Activity ${kind} is requested only. ${note}`.trim();
+    }
+  }
+
+  for (const row of events) {
+    const kind = text(row, 'kind');
+    const payload = text(row, 'payload_json');
+    if (/coordinator|showing agent/i.test(`${kind} ${payload}`)) coordinator = true;
+    if (/tour_request|showing_request/i.test(kind) || tourRequestLanguage(kind, payload)) {
+      requested = requested || `Event ${kind} is a tour request.`;
+    }
+  }
+
+  const guard = 'The signal does not confirm the tour, complete it, or make the file offer ready.';
+  if (scheduled) {
+    const reasons = [
+      'A tour is scheduled and still unconfirmed. Verify the date, time, address, and who is showing.',
+    ];
+    if (coordinator) reasons.push('A coordinator or showing-agent tour is not a tour with Kyle.');
+    else reasons.push('A schedule note is not a confirmed showing.');
+    if (zeroCompleted) reasons.push('Completed tours on file are 0. The file is not offer ready.');
+    else reasons.push(guard);
+    return {
+      actionType: 'confirm_tour_details',
+      tourState: 'scheduled',
+      score: 82,
+      bucket: 'TODAY',
+      reason: 'Verify the unconfirmed tour: date, time, address, and who is showing.',
+      reasons,
+      evidence: [`scheduled unconfirmed: ${clip(scheduled)}`],
+      readinessEvidence: 'Scheduled and unconfirmed. Not confirmed, not completed, and not offer ready.',
+      followUpTrigger: 'tour_details',
+      confidence: 'medium',
+    };
+  }
+  if (requested) {
+    return {
+      actionType: 'respond_to_tour_request',
+      tourState: 'requested',
+      score: 76,
+      bucket: 'TODAY',
+      reason: 'A tour was requested and is not scheduled. Confirm the listing and a time before other intake.',
+      reasons: [
+        'A tour request is not a scheduled tour and is not confirmed.',
+        'The request outranks the open intake question.',
+        guard,
+      ],
+      evidence: [`requested only: ${clip(requested)}`],
+      readinessEvidence: 'Requested only. Not scheduled, not confirmed, and not completed.',
+      followUpTrigger: 'tour_request',
+      confidence: 'medium',
+    };
+  }
+  if (recentInference) {
+    const reasons = [
+      inferenceHappened
+        ? 'A recent tour note says a tour may have happened. Kyle has not verified it.'
+        : 'A recent tour note is unverified. It stays ahead of intake.',
+    ];
+    reasons.push(coordinator
+      ? 'A coordinator or showing-agent tour is not a tour with Kyle.'
+      : 'The note is not a confirmed tour with Kyle.');
+    reasons.push(guard);
+    return {
+      actionType: 'tour_follow_up',
+      tourState: 'unverified',
+      score: 74,
+      bucket: 'TODAY',
+      reason: 'Ask how the recent tour went. One question, and Kyle has not verified it.',
+      reasons,
+      evidence: [`unverified recent tour: ${clip(recentInference)}`],
+      readinessEvidence: coordinator
+        ? 'Unverified tour note. Not confirmed, not completed, and not a tour with Kyle.'
+        : 'Unverified tour note. Not confirmed and not completed.',
+      followUpTrigger: 'tour_follow_up',
+      confidence: 'low',
+    };
+  }
+  return null;
+}
+
+function syncIntakeSecondary(db: SqlDb, opp: Opp, stage: string, tour: TourChoice | null, now: Date): void {
+  const clear = () => {
+    db.run(
+      `DELETE FROM next_best_actions WHERE opportunity_id = ? AND is_primary = 0 AND source = 'intake_secondary'`,
+      opp.id,
+    );
+  };
+  if (!tour) {
+    clear();
+    return;
+  }
+  const question = selectQuestion(db, opp.id);
+  if (!question) {
+    clear();
+    return;
+  }
+  const intakeScore = stage === 'QUALIFYING' ? 60 : 70;
+  const reason = question.question;
+  const reasons = ['Intake question stays secondary while a tour signal is the primary action.'];
+  const evidence = [`secondary intake field ${question.field}`];
+  const params = [
+    'ask_next_question',
+    reason,
+    JSON.stringify(evidence),
+    'TODAY',
+    'medium',
+    'draft',
+    1,
+    text(db.get(`SELECT next_action_due_at FROM opportunities WHERE id = ?`, opp.id), 'next_action_due_at') || null,
+    'One intake question stays drafted behind the tour step. Nothing is sent.',
+    'Leave the prior confirmed facts in place and ask Kyle.',
+    'intake_answer',
+    intakeScore,
+    'TODAY',
+    JSON.stringify(reasons),
+    now.toISOString(),
+  ];
+  const existing = db.get(
+    `SELECT id FROM next_best_actions WHERE opportunity_id = ? AND is_primary = 0 AND source = 'intake_secondary'`,
+    opp.id,
+  );
+  if (existing) {
+    db.run(
+      `UPDATE next_best_actions SET
+        action_type = ?, reason = ?, evidence_json = ?, urgency = ?, confidence = ?, execution_method = ?,
+        approval_required = ?, deadline = ?, expected_outcome = ?, failure_action = ?, follow_up_trigger = ?,
+        priority_score = ?, priority_bucket = ?, priority_reasons_json = ?, updated_at = ?, is_primary = 0, live = 0
+       WHERE id = ?`,
+      ...params,
+      text(existing, 'id'),
+    );
+    return;
+  }
+  db.run(
+    `INSERT INTO next_best_actions (
+      id, client_id, opportunity_id, action_type, reason, evidence_json, urgency, confidence,
+      execution_method, approval_required, deadline, expected_outcome, failure_action, follow_up_trigger,
+      priority_score, priority_bucket, priority_reasons_json, is_primary, live, created_at, updated_at, source, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 'intake_secondary', 'system')`,
+    randomUUID(),
+    opp.clientId,
+    opp.id,
+    ...params,
+    now.toISOString(),
+  );
+}
+
+function scheduledTourLanguage(field: string, value: string): boolean {
+  if (/scheduled_tour|upcoming_tour|tour_scheduled/i.test(field)) return true;
+  return /upcoming tour|tour agent scheduled|scheduled tour/i.test(value);
+}
+
+function tourRequestLanguage(field: string, value: string): boolean {
+  if (scheduledTourLanguage(field, value)) return false;
+  if (/tour_request|showing_request/i.test(field)) return true;
+  return /\btour request\b|\brequested (a |an )?tour\b|\bshowing requested\b/i.test(value);
+}
+
+function mentionsTour(field: string, value: string): boolean {
+  return /\btour\b/i.test(`${field} ${value}`);
+}
+
+function claimsTourHappened(value: string): boolean {
+  const lowered = value
+    .toLowerCase()
+    .replace(/not a completed tour/g, '')
+    .replace(/not completed/g, '')
+    .replace(/not a tour with kyle/g, '');
+  return /\b(completed|happened|already showed|toured)\b/.test(lowered);
+}
+
+function tourMoment(value: string, observedAt: string, now: Date): number | null {
+  const iso = value.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso?.[1]) {
+    const parsed = Date.parse(`${iso[1]}T00:00:00.000Z`);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  const month = value.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b/i);
+  if (month?.[1] && month[2]) {
+    const names = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const index = names.indexOf(month[1].toLowerCase().slice(0, 3));
+    const day = Number(month[2]);
+    if (index >= 0 && day >= 1 && day <= 31) return Date.UTC(now.getUTCFullYear(), index, day);
+  }
+  const observed = Date.parse(observedAt);
+  return Number.isNaN(observed) ? null : observed;
+}
+
+function clip(value: string): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length > 240 ? `${compact.slice(0, 237)}...` : compact;
 }
 
 function selectQuestion(db: SqlDb, opportunityId: string): NextQuestion | null {

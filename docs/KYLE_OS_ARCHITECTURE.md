@@ -128,6 +128,8 @@ Financing runs from `UNKNOWN` through `FINANCING_READY`. A granted lender introd
 
 A confirmed need to sell creates a `redfin_seller` opportunity and stores both ids on `opportunity_links`. A renter lease date writes target dates for preapproval, consult, search, touring, and the offer window. Consult triggers stay drafts. Offer, legal, commission, financing-problem, frustration, and “ask for Kyle” messages write a handoff card with `approval_required` and do not set `OFFER_SUBMITTED`.
 
+A scheduled or requested tour signal outranks the intake question. The primary action is `confirm_tour_details` when a tour is scheduled and not confirmed, `respond_to_tour_request` when it is only requested, or `tour_follow_up` when a recent unverified note says a tour may have happened. The intake question stays a non-primary row. Requested, scheduled, confirmed, and completed stay distinct. A coordinator or showing-agent note is not a tour with Kyle. The signal does not set the tour confirmed or completed, and it does not set `OFFER_READY`. The draft stays `approval_required` with `execution_method` `draft` and `live` 0. Tests: `ops/test/tour-first.test.ts`.
+
 Banned draft phrases are `just checking in`, `touching base`, `circling back`, and `I'm paid on your satisfaction`.
 
 Tests: `ops/test/conversion.test.ts` (BUYER 1, BUYER 2, BUYER 3, BUYER 7, BUYER 9, DATA 1).
@@ -169,7 +171,7 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch after the Agent Tools loader: typecheck passed. `npm test` reported 98 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
+2026-09-29 result on this branch after the tour-first next-best-action rule: typecheck passed. `npm test` reported 102 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests, handoff cards, and approval attempts in later suites have `live = 0`. `sent_messages` stays empty. Dry-run providers do not report `sent`.
 
 ## 9. Audit after `main` was merged
 

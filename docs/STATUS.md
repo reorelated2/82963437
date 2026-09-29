@@ -8,7 +8,7 @@ Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 stay
 - Buyer-conversion ledger in `ops/src/runtime/`. Policy `2026-09-27.unreleased`. `liveSend` false. Tick command exists. No platform routine is registered.
 - Phase 1 canonical records on the desk SQLite file: clients, opportunities, idempotent events, verified facts versus inferences, identity flags, workflow locks, migration `2026-09-29-canonical-clients`.
 - Phase 2 communication foundation, still dry-run: provider interfaces, synthetic adapters, Twilio/Quo/Gmail/Vapi shells that do not send, consent, communication log, inbound events, frequency limit, and workflow-lock reuse. Migration `2026-09-29-communication`.
-- Phase 3 conversion engine, still dry-run: buyer stage and readiness flags, confirmed-only classification, one next intake question, financing states and lender handoff, sale-linked seller opportunity, renter reverse timeline, draft consult requests, one next-best action, and Level 4 handoff cards. Migration `2026-09-29-conversion`.
+- Phase 3 conversion engine, still dry-run: buyer stage and readiness flags, confirmed-only classification, one next intake question, financing states and lender handoff, sale-linked seller opportunity, renter reverse timeline, draft consult requests, one next-best action, and Level 4 handoff cards. A scheduled, requested, or recent unverified tour signal outranks intake. The tour is not marked confirmed, completed, or offer ready from that signal. Migration `2026-09-29-conversion`.
 - Phase 4 on the same file: seller intake and seller stages, approval queue, dry-run SMS/email/voice gate, fact review, and the Notion sync contract. Live send stays off.
 - Architecture map: `docs/KYLE_OS_ARCHITECTURE.md`. Notion contract: `docs/NOTION_SYNC_CONTRACT.md`.
 - Agent Tools ingestion contract: `docs/AGENT_TOOLS_INGESTION.md`. Loader: `ops/src/ingest/agentTools.ts`. Synthetic fixture only. The 28-record export is not in the repo. Bulk apply is refused.
@@ -21,7 +21,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test`: **98 passed, 0 failed** on 2026-09-29 after the Agent Tools dry-run loader. The checks are in `ops/test/agent-tools-ingest.test.ts`.
+Typecheck passed. `npm test`: **102 passed, 0 failed** on 2026-09-29 after the tour-first next-best-action rule. The new checks are in `ops/test/tour-first.test.ts`. Agent Tools checks remain in `ops/test/agent-tools-ingest.test.ts`.
 
 The first test run, before Pillow was installed, was 51 passed and 1 failed. The failure was the screenshot fixture (`Pillow is required to draw the screenshot fixture.`). After Pillow was installed, that test passed with the rest. Pillow is an environment tool, not an `ops` dependency.
 
