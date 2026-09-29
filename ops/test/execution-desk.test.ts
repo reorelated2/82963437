@@ -301,6 +301,26 @@ test('section 49: system can draft SMS but cannot send', () => {
   assert.doesNotMatch(card.humanAction, /TEXT SENT/);
 });
 
+test('showing detail keeps every tour line and leaves a missing field as DATA NEEDED', () => {
+  const card = planDesk(evidence({
+    name: 'Two Tours',
+    facts: [
+      verified('buying_activity', '0 tours Sep 20 - Upcoming tour agent scheduled with Kyle Kleinman'),
+      { field: 'showing_detail', value: 'date=9/27; time=6 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED', kind: 'fact', verification: 'unverified' },
+      { field: 'showing_detail', value: 'date=9/20; time=4 PM; agent=DATA NEEDED; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED', kind: 'fact', verification: 'unverified' },
+    ],
+  }));
+  assert.ok(card.showingLines.some((line) => line.startsWith('9/27 6 PM Larry Dix showing, OUTCOME NOT CONFIRMED. Evidence: THIRD PARTY REPORTED.')));
+  assert.ok(card.showingLines.some((line) => line.startsWith('9/20 DATA NEEDED Kyle Kleinman showing, OUTCOME NOT CONFIRMED. Evidence: THIRD PARTY REPORTED.')));
+  assert.ok(card.showingLines.some((line) => line.startsWith('9/20 4 PM DATA NEEDED showing, OUTCOME NOT CONFIRMED. Evidence: THIRD PARTY REPORTED.')));
+  assert.match(card.showingConflict ?? '', /Do not pick one/);
+  assert.equal(card.showingState, 'OUTCOME_UNKNOWN');
+  assert.doesNotMatch(`${card.clientDraft}`, /Larry Dix|9\/27/);
+  const quiet = planDesk(evidence({ name: 'No Tour', facts: [verified('property_address', '10 Fixture St')] }));
+  assert.deepEqual(quiet.showingLines, []);
+  assert.equal(quiet.showingConflict, null);
+});
+
 test('showing state machine stores every section 13 state as its own transition', () => {
   const db = tempDb();
   const opportunityId = 'opp-showing-states';
@@ -357,6 +377,11 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.match(echo.primaryAction, /TEXT ECHO NIU NOW/);
   assert.equal(echo.showingState, 'OUTCOME_UNKNOWN');
   assert.equal(echo.askQualificationNow, false);
+  assert.ok(echo.showingLines.some((line) => line.startsWith('9/27 6 PM Larry Dix showing, OUTCOME NOT CONFIRMED')));
+  assert.ok(echo.showingLines.some((line) => /9\/20 DATA NEEDED Kyle Kleinman showing, OUTCOME NOT CONFIRMED/.test(line)));
+  assert.ok(echo.showingLines.some((line) => /9\/20 4 PM DATA NEEDED showing, OUTCOME NOT CONFIRMED/.test(line)));
+  assert.match(echo.showingConflict ?? '', /SHOWING CONFLICT: 9\/20 and 9\/27/);
+  assert.doesNotMatch(echo.showingLines.join('\n'), /SHOWING_COMPLETED/);
   const claudia = brief.cards.find((card) => card.clientName === 'Claudia Pinheiro');
   assert.match(claudia?.humanAction ?? '', /CALL/);
   const mark = brief.cards.find((card) => card.clientName === 'Mark Maccagno');
@@ -366,6 +391,7 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.match(mark?.offerReadiness.nextAction ?? '', /Not offer ready/);
   assert.match(mark?.agentToolsNote ?? '', /offer request/);
   assert.doesNotMatch(mark?.humanAction ?? '', /OFFER SUBMITTED/);
+  assert.deepEqual(mark?.showingLines, []);
   const perry = brief.cards.find((card) => card.clientName === 'Perry Crawford');
   assert.match(perry?.humanAction ?? '', /GET PERRY CRAWFORD'S CELL/);
   assert.match(perry?.whyNow ?? '', /Two saved searches/);

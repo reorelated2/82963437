@@ -170,8 +170,10 @@ function morningView() {
     box.append(
       el('h3', { text: `${card.priority}. ${card.clientName}` }),
       el('p', { text: card.whyNow }),
-      el('p', { class: 'action', text: card.primaryAction || card.humanAction }),
     );
+    for (const line of card.showingLines || []) box.append(el('p', { text: line }));
+    if (card.showingConflict) box.append(el('p', { class: 'rule', text: card.showingConflict }));
+    box.append(el('p', { class: 'action', text: card.primaryAction || card.humanAction }));
     for (const extra of card.secondaryActions || []) box.append(el('p', { text: extra }));
     if (card.searchPlan && card.searchPlan.mode !== 'none') {
       box.append(el('p', { text: `SEARCH ${card.searchPlan.mode.toUpperCase()}. REQUIRED: ${card.searchPlan.required}. PREFERRED: ${card.searchPlan.preferred}. DO NOT FILTER OUT YET: ${card.searchPlan.doNotFilter}` }));

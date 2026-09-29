@@ -19,8 +19,9 @@
         { "field": "saved_search", "value": "Miami, 3-4 beds, 2.5+ baths, $500K-$1.5M", "kind": "fact", "verification": "verified", "evidence": "Agent Tools saved search" },
         { "field": "hot_score", "value": "165", "kind": "fact", "verification": "verified", "evidence": "Agent Tools rank score" },
         { "field": "lead_source", "value": "Redfin", "kind": "fact", "verification": "verified", "evidence": "Original source on the export" },
-        { "field": "showing_address", "value": "90 SW 3rd St #308", "kind": "inference", "verification": "unverified", "evidence": "Gmail notice Sun Sep 27 6:00 PM with associate Larry Dix. Not confirmed that she attended." },
-        { "field": "gmail_tour", "value": "Sun Sep 27 6:00 PM associate Larry Dix at 90 SW 3rd St #308. Outcome unknown.", "kind": "inference", "verification": "unverified", "evidence": "Redfin Gmail notice. Unsent drafts are not contact." },
+        { "field": "showing_address", "value": "90 SW 3rd St #308", "kind": "inference", "verification": "unverified", "evidence": "Gmail notice for the 9/27 showing. Attendance was not confirmed." },
+        { "field": "showing_detail_0927", "value": "date=9/27; time=6 PM; agent=Larry Dix; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED", "kind": "fact", "verification": "unverified", "evidence": "Gmail appointment at 90 SW 3rd St #308. Status needs verification. Not a completed tour." },
+        { "field": "showing_detail_0920", "value": "date=9/20; time=4 PM; agent=DATA NEEDED; outcome=OUTCOME NOT CONFIRMED; class=THIRD PARTY REPORTED", "kind": "fact", "verification": "unverified", "evidence": "Gmail first-tour appointment. That appointment does not name a showing agent." },
         { "field": "sms_draft", "value": "Unsent SMS draft claims the Sep 27 tour at 90 SW 3rd St #308 already happened.", "kind": "inference", "verification": "unverified", "evidence": "Prepared draft only. It was not sent. No source confirms the tour happened." }
       ]
     },

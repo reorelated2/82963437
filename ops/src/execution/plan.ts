@@ -64,6 +64,8 @@ export interface ExecutionCard {
   showingTransitions: string[];
   agentToolsUpdate: { open: string; paste: string; thenSet: string };
   milestones: TransactionMilestone[];
+  showingLines: string[];
+  showingConflict: string | null;
 }
 
 const URL_OK = /^https:\/\/[^\s]+$/i;
@@ -104,7 +106,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     hotScore: Number.isFinite(hotScore) ? hotScore : 0,
   };
 
-  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
+  const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live' | 'primaryAction' | 'secondaryActions' | 'guardrail' | 'anchor' | 'searchPlan' | 'offerReadiness' | 'transactionLine' | 'showingTransitions' | 'agentToolsUpdate' | 'milestones' | 'showingLines' | 'showingConflict'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
     const full = { ...card, manualActionRequired: true as const, approvalRequired: true as const, live: false as const } as ExecutionCard;
     for (const draft of [full.clientDraft, full.callOpening, full.emailDraft]) {
       if (!draft) continue;
@@ -157,6 +159,12 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     full.transactionLine = transactionLine(input.facts);
     full.milestones = transactionMilestones(input.facts);
     full.showingTransitions = justifiedShowings(input, full.showingState);
+    const showing = collectShowingLines(input.facts);
+    full.showingLines = showing.lines;
+    full.showingConflict = showing.conflict;
+    if (showing.conflict && !/SHOWING CONFLICT/.test(full.whyNow)) {
+      full.whyNow = `${full.whyNow} ${showing.conflict}`;
+    }
     const splitAt = full.internalCode === 'cma_needed' ? full.humanAction.indexOf('CMA NEEDED') : 0;
     if (splitAt > 0) {
       full.primaryAction = full.humanAction.slice(splitAt);
@@ -1403,6 +1411,106 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
   });
 }
 
+const SHOWING_MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function collectShowingLines(facts: DeskFact[]): { lines: string[]; conflict: string | null } {
+  const lines: string[] = [];
+  const dates: string[] = [];
+  for (const fact of facts) {
+    if (!isShowingFact(fact)) continue;
+    const line = formatShowingLine(fact);
+    if (!line || lines.includes(line.text)) continue;
+    lines.push(line.text);
+    if (line.date !== 'DATA NEEDED' && !dates.includes(line.date)) dates.push(line.date);
+  }
+  const conflict = dates.length > 1
+    ? `SHOWING CONFLICT: ${dates.join(' and ')} are both on file. Do not pick one. Outcome is not confirmed.`
+    : null;
+  return { lines, conflict };
+}
+
+function isShowingFact(fact: DeskFact): boolean {
+  if (/sms_draft|gmail_draft|unsent_draft|showing_address|saved_search|hot_score|lead_source|reminders/.test(fact.field)) return false;
+  if (/showing_detail|gmail_tour|associate_tour|scheduled_tour_note|coordinator_tour/.test(fact.field)) return true;
+  if (fact.field !== 'buying_activity' && fact.field !== 'showing_requested') return false;
+  if (/meeting scheduled/i.test(fact.value)) return false;
+  return /upcoming tour|tour agent scheduled|scheduled tour|\btour\b|showing/i.test(fact.value);
+}
+
+function formatShowingLine(fact: DeskFact): { text: string; date: string } | null {
+  const structured = parseStructuredShowing(fact.value);
+  const date = structured?.date || proseDate(fact.value) || 'DATA NEEDED';
+  const time = structured?.time || proseTime(fact.value) || 'DATA NEEDED';
+  const agent = structured?.agent || proseAgent(fact.value) || 'DATA NEEDED';
+  const outcome = structured?.outcome || proseOutcome(fact.value);
+  const evidence = structured?.evidenceClass || showingEvidenceClass(fact);
+  if (date === 'DATA NEEDED' && time === 'DATA NEEDED' && agent === 'DATA NEEDED') return null;
+  return {
+    date,
+    text: `${date} ${time} ${agent} showing, ${outcome}. Evidence: ${evidence}.`,
+  };
+}
+
+function parseStructuredShowing(value: string): { date: string; time: string; agent: string; outcome: string; evidenceClass: string } | null {
+  if (!/date=/.test(value)) return null;
+  const grab = (key: string) => value.match(new RegExp(`(?:^|;)\\s*${key}=([^;]+)`))?.[1]?.trim() ?? '';
+  return {
+    date: grab('date') || 'DATA NEEDED',
+    time: grab('time') || 'DATA NEEDED',
+    agent: grab('agent') || 'DATA NEEDED',
+    outcome: grab('outcome') || 'OUTCOME NOT CONFIRMED',
+    evidenceClass: grab('class') || 'SOURCE REPORTED',
+  };
+}
+
+function proseDate(value: string): string | null {
+  const iso = value.match(/\b20\d{2}-(\d{2})-(\d{2})\b/);
+  if (iso?.[1] && iso[2]) return `${Number(iso[1])}/${Number(iso[2])}`;
+  const month = value.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i);
+  if (!month?.[1] || !month[2]) return null;
+  const number = SHOWING_MONTHS[month[1].slice(0, 3).toLowerCase()];
+  return number ? `${number}/${Number(month[2])}` : null;
+}
+
+function proseTime(value: string): string | null {
+  const match = value.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (!match?.[1] || !match[3]) return null;
+  const hour = Number(match[1]);
+  const minute = match[2] ?? '00';
+  const mer = match[3].toUpperCase();
+  if (!minute || minute === '00') return `${hour} ${mer}`;
+  return `${hour}:${minute} ${mer}`;
+}
+
+function proseAgent(value: string): string | null {
+  const patterns = [
+    /associate agent ([A-Z][a-z]+ [A-Z][a-z]+)/,
+    /showing agent ([A-Z][a-z]+ [A-Z][a-z]+)/,
+    /coordinator ([A-Z][a-z]+ [A-Z][a-z]+)/,
+    /associate ([A-Z][a-z]+ [A-Z][a-z]+)/,
+    /with ([A-Z][a-z]+ [A-Z][a-z]+)/,
+  ];
+  for (const pattern of patterns) {
+    const found = value.match(pattern);
+    if (found?.[1]) return found[1];
+  }
+  return null;
+}
+
+function proseOutcome(value: string): string {
+  if (/\bcancel/i.test(value) && !/not cancel/i.test(value)) return 'SHOWING CANCELLED';
+  return 'OUTCOME NOT CONFIRMED';
+}
+
+function showingEvidenceClass(fact: DeskFact): string {
+  if (fact.kind === 'inference') return 'SYSTEM INFERENCE';
+  if (fact.verification !== 'verified') return 'SOURCE REPORTED';
+  if (fact.field === 'buying_activity') return 'THIRD PARTY REPORTED';
+  return 'VERIFIED FACT';
+}
+
 function heldWhy(input: DeskEvidence): string {
   const any = (field: string) => input.facts.find((fact) => fact.field === field)?.value ?? '';
   const parts: string[] = [];
@@ -1597,6 +1705,8 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
       `PROPERTY: ${card.propertyAddress ?? 'DATA NEEDED'}`,
       `PROPERTY STATUS: ${card.propertyStatus}`,
       `SHOWING: ${card.showingState}`,
+      ...(card.showingLines.length ? card.showingLines : ['SHOWING DETAIL: none on file']),
+      card.showingConflict ?? 'SHOWING CONFLICT: none',
       `DO THIS: ${card.primaryAction}`,
       card.secondaryActions.length ? `THEN: ${card.secondaryActions.join(' ')}` : 'THEN: none',
       card.searchPlan.mode === 'none' ? 'SEARCH: none on file' : `SEARCH: ${card.searchPlan.mode.toUpperCase()}. REQUIRED: ${card.searchPlan.required}. PREFERRED: ${card.searchPlan.preferred}. DO NOT FILTER OUT YET: ${card.searchPlan.doNotFilter}`,
