@@ -1,6 +1,6 @@
 # KyleOS status
 
-Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 remains open against `main` and is still conflicting. Phases 1 through 4 continue on that lineage in PR #17. They do not merge to `main`.
+Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 stays open against `main` and is not merged. Phases 1 through 4 continue on that lineage in PR #17. They do not merge to `main`.
 
 ## Built
 
@@ -37,8 +37,8 @@ No live SMS, email, or call was sent. No Redfin or MLS API was added. `sent_mess
 
 ## Blocked
 
-- PR #12 `mergeable_state` is dirty against `main`. Conflicts are `.gitignore`, `README.md`, and docs: `ARCHITECTURE`, `BACKLOG`, `BACKUP`, `DAILY_GUIDE`, `INTEGRATIONS`, `REQUIREMENTS`, `SETUP`, `TASK_QUEUE`, `TEST_RESULTS`. `ops/` is not in the conflict list. Do not delete it.
-- PR #17 is mergeable into `cursor/lead-follow-up-os-5170`. It is not a merge to `main`.
+- PR #12's doc conflicts with `main` were resolved by a normal merge of `origin/main` into `cursor/lead-follow-up-os-5170`. `ops/` stayed. Do not merge PR #12 into `main` from this work.
+- PR #17 includes that updated lead branch. It is not a merge to `main`.
 - Hosted deploy is not set up.
 - Redfin Partner Tools write-back, MLS, and ShowingTime are not connected.
 - Quo, Gmail, Twilio, and Vapi have shells only. No credentials are stored and no request is sent.
@@ -48,4 +48,33 @@ No live SMS, email, or call was sent. No Redfin or MLS API was added. `sent_mess
 
 ## Next
 
-Keep `DRY_RUN`. The next useful slice is a reviewed Notion sync that follows `docs/NOTION_SYNC_CONTRACT.md` and still does not send. Live SMS, email, calling, and lender handoff stay off until Kyle supplies credentials and a sandbox call returns `not_attempted`. Resolve PR #12's doc conflicts without removing `ops/` before anything merges to `main`.
+Keep `DRY_RUN`. The next useful slice is a reviewed Notion sync that follows `docs/NOTION_SYNC_CONTRACT.md` and still does not send. Live SMS, email, calling, and lender handoff stay off until Kyle supplies credentials and a sandbox call returns `not_attempted`.
+
+## Buyer Command Center (`backend/` and `mobile/`)
+
+Updated: 2026-09-24 on `main`, kept when `origin/main` was merged into `cursor/lead-follow-up-os-5170`. This section is the consult app. It is not the inquiry CRM. Boundary: `docs/HANDOFF_BOUNDARY.md`.
+
+## BUILT
+
+- Consult, market, strategy, and client routes remain in `backend/src/server.ts` and `mobile/`.
+- `GET /mls/hiram-zone` returns the existing seed and now marks it `demo: true`.
+- `POST /mls/analyze` ranks only listings the caller supplies. It says it is not a live MLS connection.
+- The inquiry board under `backend/src/os` is not mounted. `ENABLE_LEAD_DESK` is unset on purpose.
+
+## VERIFIED
+
+`cd backend && npx tsc --noEmit && npm test` — typecheck passed, 22 passed, 0 failed.
+
+On the running process at `http://127.0.0.1:8080`: `GET /` names the Buyer Command Center and says the lead desk is not mounted. `GET /health` has `leadDeskMounted: false`. `GET /api/os/workspace` is HTTP 404. `GET /mls/hiram-zone` is `demo: true` with 18 active rows out of 20. Evidence is in `docs/TEST_RESULTS.md`.
+
+## BLOCKED
+
+- Supabase is not configured, so `/markets/:city` and `/clients` cannot save.
+- `OPENAI_API_KEY` is absent, so `/strategy` cannot run.
+- No Redfin private API and no live MLS feed.
+- This server does not send client messages.
+- This environment is not a deployment.
+
+## NEXT
+
+Leave Stage 1 (inquiry, SEND, NOTE, NEXT, daily board) on `ops/`. Further work on the consult app stays on consult intake, market metrics, and MLS analyze helpers. The inquiry board is not port 8080.

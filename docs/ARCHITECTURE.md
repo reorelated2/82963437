@@ -1,8 +1,8 @@
 # Architecture
 
-The 2026-09-29 map of the whole repository, including the Phase 1 client and event tables, is [KYLE_OS_ARCHITECTURE.md](KYLE_OS_ARCHITECTURE.md). Current status is [STATUS.md](STATUS.md). This file is the original Stage 1 desk note.
+The 2026-09-29 map of the whole repository, including the Phase 1 client and event tables, is [KYLE_OS_ARCHITECTURE.md](KYLE_OS_ARCHITECTURE.md). Current status is [STATUS.md](STATUS.md). This file is the original Stage 1 desk note, plus the consult-app boundary brought in from `main`.
 
-## Choice
+## KyleOS desk (`ops/`)
 
 The first release is a local web desk plus a SQLite file. Node serves the page and the API. No hosted database, no paid AI API, and no Redfin login are required to use the workflow.
 
@@ -36,7 +36,7 @@ Intake text is stored as data. It is not executed and it cannot change these rul
 
 Screenshot reading uses local Tesseract. If Tesseract is missing, or confidence is under 45, no contact is created.
 
-## Where the code lives
+## Where the KyleOS code lives
 
 | Path | Role |
 | --- | --- |
@@ -46,3 +46,27 @@ Screenshot reading uses local Tesseract. If Tesseract is missing, or confidence 
 | `ops/src/server.ts` | Local HTTP API and pages |
 | `ops/public/` | Mobile-friendly desk |
 | `ops/test/lead-workflow.test.ts` | Acceptance checks |
+
+## Consult app and the unmounted backend experiment
+
+`main` describes a different local desk that is not the KyleOS operating path. That experiment lives under `backend/src/os` and is not mounted by the Buyer Command Center server. Leave `ENABLE_LEAD_DESK` unset. Its database, if someone runs that code later, is `backend/data/os.sqlite`, not `ops/data/desk.sqlite`.
+
+What that experiment was designed to do:
+
+- Browser page: `backend/public`. Open `http://127.0.0.1:8080` only for the consult app. The consult app's `/` response is the Buyer Command Center, not this desk.
+- API shape, when mounted: `/api/os/...` in the same process.
+- Screenshots: `backend/data/uploads`. Backups: `backend/data/backups`.
+- Older consultation app: `mobile/` and the `/markets`, `/strategy`, `/clients`, `/mls` routes. Left in place. The Redfin page collector does not start unless `RUN_REDFIN_COLLECTOR=true`.
+
+Record notes from that experiment, kept so the design is not lost:
+
+- `contact_identifiers` match an exact phone or email. The same name with a different phone is not merged.
+- `sources` keep pasted text or a screenshot path and a content hash.
+- `facts` store stated, data needed, unclear, or conflict.
+- `households` link people. Opting out one person does not change the other person's permission.
+- `source_attributions` keep every lead source. A later source does not replace the first.
+- `properties` and `showings` keep address, MLS, requested time, available time, and confirmed time apart.
+- `messages` are drafts. `sent_at` stays empty.
+- `jobs` retry at most 3 times. `settings` hold the outbound pause (default on) and the spending limit (default $0). `authorizations` stay empty.
+
+`backend/src/lib/redfinCollector.ts` scrapes public Redfin market pages. It is not an MLS connection and it is off unless explicitly enabled. `backend/src/lib/db.ts` still talks to Supabase for the older consult app. The KyleOS desk does not use that client.

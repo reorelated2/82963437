@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import type { MarketRow } from '../types';
+import type { MarketRow } from '../types/index.js';
 
 const FALLBACK: Record<string, Pick<MarketRow, 'median_sale_price' | 'yoy_change_percent' | 'avg_dom'>> = {
   Hialeah: { median_sale_price: 430000, yoy_change_percent: -10.9, avg_dom: 76 },

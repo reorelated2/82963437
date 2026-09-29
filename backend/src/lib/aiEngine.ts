@@ -1,13 +1,18 @@
 import OpenAI from 'openai';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function client(): OpenAI {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not set. Strategy generation is not connected.');
+  }
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 const SYSTEM_PROMPT = `You are a real-estate strategy engine. Return JSON only with keys:
 leadScore, readinessPercent, summary, arvMath, scripts{marketDropping,ratesHigh,lowInventory}, nextAction.
 Never invent unavailable metrics, use \"Not available\" when needed.`;
 
 export async function generateStrategy(payload: unknown) {
-  const response = await client.responses.create({
+  const response = await client().responses.create({
     model: 'gpt-4.1-mini',
     input: [
       { role: 'system', content: SYSTEM_PROMPT },
