@@ -7,3 +7,4 @@ ops/data/*.png
 *.log
 .env
 .env.*
+!.env.example

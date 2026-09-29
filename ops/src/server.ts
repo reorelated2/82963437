@@ -4,6 +4,8 @@ import { extname, join, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { listAgentRuns, runInquiryAgent, getAgentRun } from './agent.ts';
+import { ingestCanonicalLead, type FactInput } from './canonical.ts';
+import { sendFlags } from './mode.ts';
 import { clearCookieHeader, cookieHeader, login, sessionValid } from './auth.ts';
 import { openDatabase } from './db.ts';
 import { decodeImage, readScreenshot } from './ocr.ts';
@@ -89,6 +91,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
       outbound: 'draft',
       runtime: {
         live: false,
+        ...sendFlags(),
         routineId: null,
         schedule: '*/15 * * * *',
         timezone: 'America/New_York',
@@ -139,6 +142,22 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
     const run = getAgentRun(db, decodeURIComponent(path.slice('/api/agent/runs/'.length)));
     if (!run) return sendJson(res, 404, { error: 'Agent run not found.' });
     return sendJson(res, 200, run);
+  }
+  if (method === 'POST' && path === '/api/canonical/leads') {
+    const body = await readJson(req);
+    const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+    if (!idempotencyKey.trim()) {
+      return sendJson(res, 400, { error: 'idempotencyKey is required. Nothing was saved.' });
+    }
+    return sendJson(res, 200, ingestCanonicalLead(db, {
+      idempotencyKey,
+      source: typeof body.source === 'string' ? body.source : 'webhook',
+      rawText: typeof body.rawText === 'string' ? body.rawText : '',
+      displayName: typeof body.displayName === 'string' ? body.displayName : null,
+      phone: typeof body.phone === 'string' ? body.phone : null,
+      email: typeof body.email === 'string' ? body.email : null,
+      facts: sanitizeFacts(body.facts),
+    }));
   }
   if (method === 'POST' && path === '/api/intake') {
     const body = await readJson(req);
@@ -252,6 +271,27 @@ function idFrom(path: string, prefix: string): string {
 
 function idBetween(path: string, start: string, end: string): string {
   return decodeURIComponent(path.slice(start.length, path.length - end.length));
+}
+
+function sanitizeFacts(value: unknown): FactInput[] {
+  if (!Array.isArray(value)) return [];
+  const facts: FactInput[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const fieldKey = typeof row.fieldKey === 'string' ? row.fieldKey.trim() : '';
+    const factValue = typeof row.value === 'string' ? row.value.trim() : '';
+    if (!fieldKey || !factValue) continue;
+    const kind = row.kind === 'inference' ? 'inference' : 'fact';
+    facts.push({
+      fieldKey,
+      value: factValue,
+      kind,
+      verification: kind === 'fact' && row.verification === 'verified' ? 'verified' : 'unverified',
+      source: typeof row.source === 'string' && row.source.trim() ? row.source.trim() : 'webhook',
+    });
+  }
+  return facts;
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {

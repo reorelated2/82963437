@@ -3,6 +3,7 @@ import { FIELD_KEYS, extractLead, lacksIdentity, phoneLookupKey, type Extraction
 import { openDatabase } from './db.ts';
 import { formatEt, sameEtDay, zonedLocalToUtc, zonedParts } from './time.ts';
 import { text, transaction, type SqlDb } from './sql.ts';
+import { deleteDemoCanonical, flagDeskCandidates, syncDeskLead } from './canonical.ts';
 import { buyerSummary, crmNote, draftClientMessage, internalNote, planFollowUp, type FollowUpPlan } from './voice.ts';
 
 export interface IntakeInput {
@@ -170,6 +171,7 @@ export function intakeLead(db: SqlDb, input: IntakeInput): IntakeResult {
       now.toISOString(),
     );
     audit(db, 'contact_created', contactId, 'contact', contactId, { name: extraction.fields.name.value });
+    syncCanonical(db, input, extraction, contactId, sourceId, hash, now);
     return {
       status: 'created' as const,
       contactId,
@@ -212,6 +214,15 @@ export function resolveDuplicate(
         text(review, 'source_event_id'),
       );
       db.run(`UPDATE review_items SET status = 'resolved_separate', updated_at = ? WHERE id = ?`, now.toISOString(), reviewId);
+      const sourceId = text(review, 'source_event_id');
+      const source = db.get(`SELECT content_hash, idempotency_key FROM source_events WHERE id = ?`, sourceId);
+      syncCanonical(db, {
+        text: raw,
+        sourceKind: payload.sourceKind ?? 'paste',
+        idempotencyKey: text(source, 'idempotency_key') || null,
+        isDemo,
+        now,
+      }, extraction, contactId, sourceId, text(source, 'content_hash'), now);
       return {
         status: 'created' as const,
         contactId,
@@ -231,6 +242,15 @@ export function resolveDuplicate(
     const packaged = createPackage(db, candidate, extraction, text(review, 'source_event_id'), isDemo, now, conflicts);
     db.run(`UPDATE source_events SET contact_id = ? WHERE id = ?`, candidate, text(review, 'source_event_id'));
     db.run(`UPDATE review_items SET status = 'resolved_attach', updated_at = ? WHERE id = ?`, now.toISOString(), reviewId);
+    const sourceId = text(review, 'source_event_id');
+    const source = db.get(`SELECT content_hash, idempotency_key FROM source_events WHERE id = ?`, sourceId);
+    syncCanonical(db, {
+      text: raw,
+      sourceKind: payload.sourceKind ?? 'paste',
+      idempotencyKey: text(source, 'idempotency_key') || null,
+      isDemo,
+      now,
+    }, extraction, candidate, sourceId, text(source, 'content_hash'), now);
     return {
       status: 'attached' as const,
       contactId: candidate,
@@ -735,6 +755,7 @@ Deal breakers: no ground floor`;
 export function clearDemo(db: SqlDb): { removed: number } {
   const count = Number(db.get(`SELECT COUNT(*) AS n FROM contacts WHERE is_demo = 1`)?.n ?? 0);
   transaction(db, () => {
+    deleteDemoCanonical(db);
     db.run(`DELETE FROM contacts WHERE is_demo = 1`);
     db.run(`DELETE FROM jobs WHERE is_demo = 1`);
     db.run(`DELETE FROM source_events WHERE is_demo = 1`);
@@ -758,6 +779,12 @@ export function exportRecords(db: SqlDb): Record<string, unknown> {
     appointments: db.all(`SELECT * FROM appointments`),
     activities: db.all(`SELECT * FROM activities`),
     jobs: db.all(`SELECT * FROM jobs`),
+    clients: db.all(`SELECT * FROM clients ORDER BY created_at ASC`),
+    opportunities: db.all(`SELECT * FROM opportunities ORDER BY created_at ASC`),
+    events: db.all(`SELECT * FROM events ORDER BY received_at ASC`),
+    clientFacts: db.all(`SELECT * FROM client_facts`),
+    identityFlags: db.all(`SELECT * FROM identity_flags`),
+    workflowLocks: db.all(`SELECT * FROM workflow_locks`),
   };
 }
 
@@ -783,6 +810,7 @@ function attachPackage(db: SqlDb, input: IntakeInput, raw: string, hash: string,
     now.toISOString(),
   );
   audit(db, 'contact_matched', contactId, 'contact', contactId, { conflicts });
+  syncCanonical(db, input, extraction, contactId, sourceId, hash, now);
   return {
     status: 'attached',
     contactId,
@@ -923,6 +951,13 @@ function savePossibleDuplicate(db: SqlDb, input: IntakeInput, raw: string, hash:
     now.toISOString(),
     now.toISOString(),
   );
+  flagDeskCandidates(db, {
+    candidateContactIds: candidateIds,
+    idempotencyKey: input.idempotencyKey ?? hash,
+    now,
+    isDemo: Boolean(input.isDemo),
+    reason: 'Possible duplicate. Nothing was merged and no contact was deleted.',
+  });
   return {
     status: 'possible_duplicate',
     contactId: null,
@@ -1038,6 +1073,26 @@ function insertIdentifier(db: SqlDb, contactId: string, kind: string, normalized
   );
 }
 
+function syncCanonical(db: SqlDb, input: IntakeInput, extraction: Extraction, contactId: string, sourceEventId: string, hash: string, now: Date): void {
+  const contact = db.get(`SELECT display_name, is_demo FROM contacts WHERE id = ?`, contactId);
+  syncDeskLead(db, {
+    contactId,
+    displayName: text(contact, 'display_name') || (extraction.fields.name.status === 'known' ? extraction.fields.name.value : null),
+    phone: extraction.fields.phone.status === 'known' ? extraction.fields.phone.value : null,
+    email: extraction.fields.email.status === 'known' ? extraction.fields.email.value : null,
+    sourceEventId,
+    idempotencyKey: input.idempotencyKey ?? null,
+    contentHash: hash,
+    isDemo: Boolean(input.isDemo) || numBool(contact?.is_demo),
+    now,
+    facts: FIELD_KEYS.flatMap((key) => {
+      const field = extraction.fields[key];
+      if (field.status !== 'known' || !field.value) return [];
+      return [{ fieldKey: key, value: field.value, basis: field.basis, evidence: field.evidence }];
+    }),
+  });
+}
+
 function applyFacts(db: SqlDb, contactId: string, extraction: Extraction, sourceEventId: string, nowIso: string): Array<{ field: string; existing: string; incoming: string }> {
   const conflicts: Array<{ field: string; existing: string; incoming: string }> = [];
   for (const key of FIELD_KEYS) {
@@ -1075,6 +1130,7 @@ function applyFacts(db: SqlDb, contactId: string, extraction: Extraction, source
       conflicts.push({ field: field.label, existing: existingValue, incoming: field.value });
       continue;
     }
+    if (text(existing, 'basis') === 'confirmed' && field.basis === 'inferred') continue;
     db.run(
       `UPDATE facts SET value = ?, status = 'known', evidence = ?, source_event_id = ?, updated_at = ?, basis = ?, observed_at = ? WHERE contact_id = ? AND field_key = ?`,
       field.value,

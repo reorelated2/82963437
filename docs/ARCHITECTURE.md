@@ -1,5 +1,7 @@
 # Architecture
 
+The 2026-09-29 map of the whole repository, including the Phase 1 client and event tables, is [KYLE_OS_ARCHITECTURE.md](KYLE_OS_ARCHITECTURE.md). Current status is [STATUS.md](STATUS.md). This file is the original Stage 1 desk note.
+
 ## Choice
 
 The first release is a local web desk plus a SQLite file. Node serves the page and the API. No hosted database, no paid AI API, and no Redfin login are required to use the workflow.

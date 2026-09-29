@@ -228,6 +228,8 @@ function hydrate(db: SqlDb, row: Record<string, unknown>): OpportunityRow {
 }
 
 export function saveFact(db: SqlDb, opportunityId: string, key: string, value: string, basis: string, evidence: string, sourceVersion: string): void {
+  const existing = db.get(`SELECT basis FROM opportunity_facts WHERE opportunity_id = ? AND fact_key = ?`, opportunityId, key);
+  if (existing && text(existing, 'basis') === 'confirmed' && basis !== 'confirmed') return;
   db.run(
     `INSERT INTO opportunity_facts (opportunity_id, fact_key, value, basis, evidence, source_version)
      VALUES (?, ?, ?, ?, ?, ?)

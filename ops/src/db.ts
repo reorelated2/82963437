@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { applyCanonicalSchema } from './canonical.ts';
 import { openSql, text, type SqlDb } from './sql.ts';
 
 const SCHEMA = `
@@ -234,7 +235,19 @@ export function openDatabase(path: string): SqlDb {
   ensureColumn(db, 'contacts', 'next_action_due_at', `ALTER TABLE contacts ADD COLUMN next_action_due_at TEXT`);
   ensureColumn(db, 'contacts', 'next_action_reason', `ALTER TABLE contacts ADD COLUMN next_action_reason TEXT`);
   ensureColumn(db, 'contacts', 'next_action_owner', `ALTER TABLE contacts ADD COLUMN next_action_owner TEXT`);
+  applyCanonicalSchema(db);
+  ensureSetting(db, 'system_mode', 'DRY_RUN');
+  ensureSetting(db, 'live_send', 'false');
+  ensureSetting(db, 'sms_send', 'false');
+  ensureSetting(db, 'email_send', 'false');
+  ensureSetting(db, 'ai_calling', 'false');
   return db;
+}
+
+function ensureSetting(db: SqlDb, key: string, value: string): void {
+  const existing = db.get(`SELECT value FROM settings WHERE key = ?`, key);
+  if (existing) return;
+  db.run(`INSERT INTO settings (key, value) VALUES (?, ?)`, key, value);
 }
 
 function ensureColumn(db: SqlDb, table: 'facts' | 'contacts', column: string, alter: string): void {

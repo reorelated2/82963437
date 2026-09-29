@@ -1,5 +1,11 @@
 # Project status
 
+Updated: 2026-09-29. The short current note is [STATUS.md](STATUS.md). The repository map is [KYLE_OS_ARCHITECTURE.md](KYLE_OS_ARCHITECTURE.md).
+
+Branch lineage: `cursor/lead-follow-up-os-5170`. Phase 1 adds canonical clients, opportunities, and events on the desk database. `npm test` on 2026-09-29: 63 passed, 0 failed. Live send stays off.
+
+The rest of this file is the 2026-09-24 Stage 1 note.
+
 Updated: 2026-09-24. Branch: `cursor/lead-follow-up-os-5170`.
 
 ## What this session is
