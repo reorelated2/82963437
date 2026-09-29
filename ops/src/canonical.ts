@@ -843,8 +843,8 @@ function ensureOpenOpportunity(db: SqlDb, input: {
   const id = randomUUID();
   const nowIso = input.now.toISOString();
   db.run(
-    `INSERT INTO opportunities (id, client_id, contact_id, business_line, stage, status, source_label, is_demo, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'new', 'open', ?, ?, ?, ?)`,
+    `INSERT INTO opportunities (id, client_id, contact_id, business_line, stage, status, source_label, is_demo, created_at, updated_at, no_action_reason)
+     VALUES (?, ?, ?, ?, 'new', 'open', ?, ?, ?, ?, 'NO_ACTION_REQUIRED')`,
     id,
     input.clientId,
     input.contactId,

@@ -66,7 +66,7 @@ After Phase 1, the same commands reported typecheck passed and **63 passed, 0 fa
 
 Phase 1 in the 2026-09-29 brief is the canonical record. Before this change the desk had contacts and source events, and the buyer ledger had its own opportunities, but there was no shared client, no idempotent lead event on the desk, no split between a verified fact and an inference, no identity flag that survives a webhook, and no contact-claim lock.
 
-Phase 2, the communication foundation, is still not built. Quo, Gmail send, and any calling provider are unverified. Drafts stay drafts. This run does not add live provider calls.
+Phase 2, the communication foundation, is built and still dry-run. Quo, Gmail send, and any calling provider are unverified shells. Drafts stay drafts. This run does not add live provider calls. Phase 3, the conversion engine, is built on the same desk file and also stays dry-run.
 
 The older stage list (buyer queues, showings, offers, seller CMA, investor math) stays in `docs/BACKLOG.md`. Offers, negotiation, contracts, and commission stay behind a human gate.
 
@@ -118,6 +118,20 @@ A failed or unavailable provider is stored as `failed` with `retryable` and `ret
 
 Tests: `ops/test/comms.test.ts`.
 
+## 7c. What Phase 3 implemented
+
+Migration `2026-09-29-conversion` adds intake answers, readiness flags, buyer classifications, lender handoffs, opportunity links, reverse timelines, consult requests, handoff cards, and next-best actions on the desk file. Open opportunities gain `next_action`, `next_action_owner`, `next_action_due_at`, `follow_up_trigger`, `no_action_reason`, `primary_stage`, and `financing_state`.
+
+A new open opportunity with no plan stores `NO_ACTION_REQUIRED`. Opening a buyer file replaces that with one owner, one due time, and one follow-up trigger. The next-question selector returns one field. Cash skips preapproval. A renter skips the sale question. Classifications are stored only from `customer_confirmed` or `kyle_confirmed` answers.
+
+Financing runs from `UNKNOWN` through `FINANCING_READY`. A granted lender introduction writes a handoff with no application. Three days later, with the application still `none`, the desk writes a contextual follow-up and does not mark anything sent. `PREAPPROVED` moves the buyer to `CONSULT_READY` and writes a draft consult with `live = 0`. Sensitive borrower documents are rejected in SMS drafts.
+
+A confirmed need to sell creates a `redfin_seller` opportunity and stores both ids on `opportunity_links`. A renter lease date writes target dates for preapproval, consult, search, touring, and the offer window. Consult triggers stay drafts. Offer, legal, commission, financing-problem, frustration, and “ask for Kyle” messages write a handoff card with `approval_required` and do not set `OFFER_SUBMITTED`.
+
+Banned draft phrases are `just checking in`, `touching base`, `circling back`, and `I'm paid on your satisfaction`.
+
+Tests: `ops/test/conversion.test.ts` (BUYER 1, BUYER 2, BUYER 3, BUYER 7, BUYER 9, DATA 1).
+
 ## 8. Integrations that need credentials
 
 None of these were called in this run. None should be treated as connected.
@@ -142,4 +156,4 @@ npx tsc --noEmit
 npm test
 ```
 
-2026-09-29 result on this branch: typecheck passed. `npm test` reported 72 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. `sent_messages` stays empty.
+2026-09-29 result on this branch: typecheck passed. `npm test` reported 82 passed, 0 failed. Sends in the buyer suite remain synthetic. Communication-log rows in the Phase 2 suite have `live = 0`. Consult requests and handoff cards in the Phase 3 suite have `live = 0`. `sent_messages` stays empty.

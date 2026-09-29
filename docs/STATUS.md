@@ -1,6 +1,6 @@
 # KyleOS status
 
-Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 remains open against `main` and is still conflicting. Phase 1 and Phase 2 continue on that lineage in draft PR #17. They do not merge to `main`.
+Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 remains open against `main` and is still conflicting. Phases 1 through 3 continue on that lineage in draft PR #17. They do not merge to `main`.
 
 ## Built
 
@@ -8,6 +8,7 @@ Updated: 2026-09-29. Lineage: `cursor/lead-follow-up-os-5170`. Draft PR #12 rema
 - Buyer-conversion ledger in `ops/src/runtime/`. Policy `2026-09-27.unreleased`. `liveSend` false. Tick command exists. No platform routine is registered.
 - Phase 1 canonical records on the desk SQLite file: clients, opportunities, idempotent events, verified facts versus inferences, identity flags, workflow locks, migration `2026-09-29-canonical-clients`.
 - Phase 2 communication foundation, still dry-run: provider interfaces, synthetic adapters, Twilio/Quo/Gmail/Vapi shells that do not send, consent, communication log, inbound events, frequency limit, and workflow-lock reuse. Migration `2026-09-29-communication`.
+- Phase 3 conversion engine, still dry-run: buyer stage and readiness flags, confirmed-only classification, one next intake question, financing states and lender handoff, sale-linked seller opportunity, renter reverse timeline, draft consult requests, one next-best action, and Level 4 handoff cards. Migration `2026-09-29-conversion`.
 - Architecture map: `docs/KYLE_OS_ARCHITECTURE.md`.
 
 ## Verified this run
@@ -18,7 +19,7 @@ npx tsc --noEmit
 npm test
 ```
 
-Typecheck passed. `npm test`: **72 passed, 0 failed**.
+Typecheck passed. `npm test`: **82 passed, 0 failed**.
 
 The first test run, before Pillow was installed, was 51 passed and 1 failed. The failure was the screenshot fixture (`Pillow is required to draw the screenshot fixture.`). After Pillow was installed, that test passed with the rest. Pillow is an environment tool, not an `ops` dependency.
 
@@ -44,4 +45,4 @@ No live SMS, email, or call was sent. No Redfin or MLS API was added. `sent_mess
 
 ## Next
 
-Phase 3 can attach a real provider only after Kyle supplies credentials and a sandbox check still returns `not_attempted` until he turns one channel on. Do not enable live customer contact in that step. Resolve the PR #12 doc conflicts without removing `ops/` before anything merges to `main`.
+Keep `DRY_RUN`. Do not attach a live provider until Kyle supplies credentials, and even then a sandbox call must stay `not_attempted` until he turns one channel on. The seller file created by a sale dependency is a linked opportunity only. A full seller workflow is still out of scope. Resolve the PR #12 doc conflicts without removing `ops/` before anything merges to `main`.
