@@ -25,7 +25,7 @@ npm start
 node --experimental-strip-types --experimental-sqlite --test test/*.ts
 ```
 
-Latest result on this branch, 2026-09-29: typecheck passed. `npm test` reported 110 passed, 0 failed. Live send stayed off. The pre-Phase-1 suite on `cursor/lead-follow-up-os-5170`, after merging `main`, was 52 passed.
+Latest result on this branch, 2026-09-29: typecheck passed. `npm test` reported 111 passed, 0 failed. Backend typecheck passed and `npm test` reported 22 passed, 0 failed. Live send stayed off. The pre-Phase-1 suite on `cursor/lead-follow-up-os-5170`, after merging `main`, was 52 passed.
 
 Then open `http://127.0.0.1:8787`. Sign in with the local password from [Setup](docs/SETUP.md). The default is `local-kyle`. Click **Load sample day** to see the board. Screenshot of that synthetic board: [docs/screenshots/command-board.png](docs/screenshots/command-board.png).
 

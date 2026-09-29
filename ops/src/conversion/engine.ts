@@ -559,6 +559,7 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
     reasons.push('Stage is nurture.');
   } else {
     tourChoice = detectTourSignal(db, opp, now);
+    const cmaReminder = overdueCmaReminder(db, opp.clientId, now);
     if (tourChoice) {
       bucket = tourChoice.bucket;
       score = tourChoice.score;
@@ -567,6 +568,24 @@ export function nextBestAction(db: SqlDb, opportunityId: string, now = new Date(
       confidence = tourChoice.confidence;
       reasons.push(...tourChoice.reasons);
       evidence.push(...tourChoice.evidence);
+    } else if (cmaReminder) {
+      bucket = 'TODAY';
+      score = 85;
+      actionType = 'cma_needed';
+      reason = `CMA NEEDED. The sell CMA reminder is overdue (${cmaReminder}). Get the property address from Agent Tools. Do not CMA an assumed property.`;
+      confidence = 'high';
+      reasons.push('A verified CMA reminder is past due and is a seller task.');
+      reasons.push('Missing contact does not remove the CMA task.');
+      evidence.push(`overdue cma: ${cmaReminder}`);
+    } else if (!hasVerifiedContact(db, opp.clientId)) {
+      const name = text(db.get(`SELECT display_name FROM clients WHERE id = ?`, opp.clientId), 'display_name') || 'the client';
+      bucket = 'TODAY';
+      score = 60;
+      actionType = 'needs_contact';
+      reason = `GET ${name.toUpperCase()}'S CELL. WHERE TO LOOK: Agent Tools, Redfin, or another authorized source.`;
+      confidence = 'high';
+      reasons.push('No verified phone or email. The record is not dropped.');
+      evidence.push('contact missing');
     } else if (stage === 'NEW_INQUIRY' || stage === 'QUALIFYING') {
       bucket = 'TODAY';
       score = stage === 'NEW_INQUIRY' ? 70 : 60;
@@ -1095,7 +1114,28 @@ function syncIntakeSecondary(db: SqlDb, opp: Opp, stage: string, tour: TourChoic
   );
 }
 
-function scheduledTourIsStale(value: string, now: Date): boolean {
+function hasVerifiedContact(db: SqlDb, clientId: string): boolean {
+  const phone = db.get(`SELECT id FROM client_identifiers WHERE client_id = ? AND kind = 'phone'`, clientId);
+  const email = db.get(`SELECT id FROM client_identifiers WHERE client_id = ? AND kind = 'email'`, clientId);
+  return Boolean(phone || email);
+}
+
+function overdueCmaReminder(db: SqlDb, clientId: string, now: Date): string | null {
+  const rows = db.all(
+    `SELECT field_key, value, kind, verification FROM client_facts WHERE client_id = ?`,
+    clientId,
+  );
+  for (const row of rows) {
+    if (text(row, 'kind') !== 'fact' || text(row, 'verification') !== 'verified') continue;
+    const field = text(row, 'field_key');
+    const value = text(row, 'value');
+    if (!/cma/i.test(`${field} ${value}`)) continue;
+    if (scheduledTourIsStale(value, now) || scheduledTourIsStale(field, now)) return value;
+  }
+  return null;
+}
+
+export function scheduledTourIsStale(value: string, now: Date): boolean {
   const timed = value.match(/\b(20\d{2}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
   if (timed?.[1] && timed[2] && timed[3]) {
     let hour = Number(timed[2]);
@@ -1128,7 +1168,7 @@ function explicitTourMoment(value: string, now: Date): number | null {
   return null;
 }
 
-function scheduledTourLanguage(field: string, value: string): boolean {
+export function scheduledTourLanguage(field: string, value: string): boolean {
   if (/scheduled_tour|upcoming_tour|tour_scheduled/i.test(field)) return true;
   return /upcoming tour|tour agent scheduled|scheduled tour/i.test(value);
 }

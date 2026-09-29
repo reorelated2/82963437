@@ -81,7 +81,7 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
       });
     }
   }
-  const ordered = [...cards].sort((left, right) => right.priority - left.priority);
+  const ordered = [...cards].sort((left, right) => right.priority - left.priority || right.hotScore - left.hotScore);
   ordered.forEach((card, index) => {
     card.priority = index + 1;
   });

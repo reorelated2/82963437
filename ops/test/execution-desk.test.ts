@@ -44,6 +44,46 @@ test('financing enum keeps the old states and adds the lender gap states', () =>
   }
 });
 
+test('Agent Tools month dates Sep 20 and Sep 15 are outcome unknown', () => {
+  const db = tempDb();
+  for (const [name, phone, note] of [
+    ['Echo Niu', '3055552101', '0 tours Sep 20 - Upcoming tour agent scheduled with Kyle Kleinman'],
+    ['Erena Valle', '3055552102', '1 tours Sep 15 - Tour agent scheduled with Marcos Peon'],
+  ] as const) {
+    const created = ingestCanonicalLead(db, {
+      idempotencyKey: `month-${phone}`,
+      source: 'webhook',
+      rawText: `Name: ${name}\nPhone: ${phone}`,
+      displayName: name,
+      phone,
+      now: NOW,
+    });
+    assert.ok(created.clientId);
+    assert.ok(created.opportunityId);
+    openBuyerFile(db, { opportunityId: created.opportunityId, now: NOW });
+    writeClientFact(db, {
+      clientId: created.clientId,
+      opportunityId: created.opportunityId,
+      now: NOW,
+      fact: {
+        fieldKey: 'buying_activity',
+        value: note,
+        kind: 'fact',
+        verification: 'verified',
+        source: 'synthetic',
+      },
+    });
+    const action = nextBestAction(db, created.opportunityId, NOW);
+    assert.equal(action.action_type, 'tour_follow_up', name);
+    assert.equal(action.priority_score, 86, name);
+    assert.notEqual(action.action_type, 'confirm_tour_details', name);
+    assert.match(action.reason, /outcome is unknown/i, name);
+    const tour = db.get(`SELECT state FROM readiness_flags WHERE opportunity_id = ? AND flag = 'tour'`, created.opportunityId);
+    assert.equal(text(tour, 'state'), 'outcome_unknown', name);
+  }
+  db.close();
+});
+
 test('a past scheduled tour is outcome unknown and not a current upcoming tour', () => {
   const db = tempDb();
   const created = ingestCanonicalLead(db, {
@@ -216,7 +256,7 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.equal(brief.live, false);
   assert.equal(brief.cards.length, 7);
   const names = brief.cards.map((card) => card.clientName).sort();
-  assert.deepEqual(names, ['Alberto Alonso', 'Claudia Pinheiro', 'Echo Niu', 'Erena Valle', 'Katherine De Armas', 'Mark Maccagno', 'Perry Crawford']);
+  assert.deepEqual(names, ['Alberto Alonso', 'Claudia Pinheiro', 'Echo Niu', 'Erena & Rick Valle', 'Katherine De Armas', 'Mark Maccagno', 'Perry Crawford']);
   for (const card of brief.cards) {
     assert.equal(card.live, false);
     assert.doesNotMatch(card.humanAction, /confirm_tour_details|ask_next_question|tour_follow_up/);
@@ -230,6 +270,34 @@ test('hot 7 brief is generated with seven human cards and no sends', () => {
   assert.equal(echo.askQualificationNow, false);
   const claudia = brief.cards.find((card) => card.clientName === 'Claudia Pinheiro');
   assert.match(claudia?.humanAction ?? '', /CALL/);
+  const mark = brief.cards.find((card) => card.clientName === 'Mark Maccagno');
+  assert.match(mark?.humanAction ?? '', /GET MARK MACCAGNO'S CELL/);
+  const katherine = brief.cards.find((card) => card.clientName === 'Katherine De Armas');
+  assert.match(katherine?.humanAction ?? '', /CMA NEEDED/);
+  assert.match(katherine?.humanAction ?? '', /May 18/);
+  const echoAction = db.get(
+    `SELECT action_type, priority_score FROM next_best_actions WHERE opportunity_id = ? AND is_primary = 1`,
+    echo.opportunityId,
+  );
+  assert.equal(text(echoAction, 'action_type'), 'tour_follow_up');
+  assert.equal(Number(echoAction?.priority_score), 86);
+  const valle = brief.cards.find((card) => card.clientName === 'Erena & Rick Valle');
+  assert.ok(valle?.opportunityId);
+  const valleAction = db.get(
+    `SELECT action_type, priority_score FROM next_best_actions WHERE opportunity_id = ? AND is_primary = 1`,
+    valle.opportunityId,
+  );
+  assert.equal(text(valleAction, 'action_type'), 'tour_follow_up');
+  assert.notEqual(text(valleAction, 'action_type'), 'confirm_tour_details');
+  assert.ok(katherine?.opportunityId);
+  const seller = db.get(
+    `SELECT o.next_action FROM opportunities o
+     JOIN opportunity_links l ON l.seller_opportunity_id = o.id
+     WHERE l.buyer_opportunity_id = ?`,
+    katherine.opportunityId,
+  );
+  assert.match(text(seller, 'next_action'), /CMA NEEDED/);
+  assert.ok(Number(db.get(`SELECT COUNT(*) AS n FROM approval_queue WHERE status = 'PENDING'`)?.n) > 0);
   assert.match(brief.text, /MORNING EXECUTION BRIEF/);
   assert.match(brief.text, /Nothing was sent/);
   assert.equal(Number(db.get(`SELECT COUNT(*) AS n FROM sent_messages`)?.n), 0);
@@ -258,8 +326,11 @@ test('buildMorningBrief regenerates from the database', () => {
   const again = buildMorningBrief(db, NOW);
   assert.equal(again.generated, true);
   assert.match(again.text, /ECHO NIU/);
-  assert.match(again.text, /don't have a cell on file yet/);
-  assert.ok(again.text.indexOf('ECHO NIU') < again.text.indexOf('ERENA VALLE'));
+  assert.match(again.text, /GET MARK MACCAGNO'S CELL/);
+  assert.match(again.text, /WHERE TO LOOK/);
+  assert.match(again.text, /EMAIL ALBERTO ALONSO/);
+  assert.match(again.text, /Your saved search/);
+  assert.ok(again.text.indexOf('ECHO NIU') < again.text.indexOf('ERENA & RICK VALLE'));
   assert.equal(again.cards[0]?.clientName, 'Echo Niu');
   assert.equal(again.cards.length, 7);
   db.close();

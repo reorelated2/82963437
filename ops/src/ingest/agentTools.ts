@@ -11,6 +11,7 @@ import {
   type FactInput,
 } from '../canonical.ts';
 import { nextBestAction, openBuyerFile } from '../conversion/engine.ts';
+import { publishExecution } from '../execution/publish.ts';
 import { recordLeadSource } from '../execution/source.ts';
 import { FINANCING_STATES, PRIMARY_STAGES, SEARCH_STATES, type FinancingState, type SearchState } from '../conversion/policy.ts';
 import { sendFlags } from '../mode.ts';
@@ -337,6 +338,7 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
     now,
   });
   const opp = db.get(`SELECT follow_up_trigger, primary_stage, financing_state, search_state FROM opportunities WHERE id = ?`, ingested.opportunityId);
+  publishExecution(db, { clientId: ingested.clientId, opportunityId: ingested.opportunityId, now });
   return {
     recordId: record.record_id,
     sourceId: record.source.source_id,
@@ -416,6 +418,9 @@ function finishHeld(
         writtenToAgentTools: false,
       },
     });
+    if (held.clientId && held.opportunityId) {
+      publishExecution(db, { clientId: held.clientId, opportunityId: held.opportunityId, now });
+    }
   }
   return {
     recordId: record.record_id,

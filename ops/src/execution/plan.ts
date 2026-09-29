@@ -1,3 +1,4 @@
+import { scheduledTourIsStale, scheduledTourLanguage } from '../conversion/engine.ts';
 import { screenKyleVoice } from '../conversion/policy.ts';
 
 export interface DeskFact {
@@ -50,6 +51,7 @@ export interface ExecutionCard {
   approvalRequired: true;
   live: false;
   internalCode: string;
+  hotScore: number;
 }
 
 const URL_OK = /^https:\/\/[^\s]+$/i;
@@ -57,7 +59,11 @@ const URL_OK = /^https:\/\/[^\s]+$/i;
 export function planDesk(input: DeskEvidence): ExecutionCard {
   const verified = (field: string) => input.facts.find((fact) => fact.field === field && fact.kind === 'fact' && fact.verification === 'verified')?.value ?? null;
   const any = (field: string) => input.facts.find((fact) => fact.field === field)?.value ?? null;
-  const property = verified('property_address') ?? verified('inquiry_property');
+  const property = verified('property_address')
+    ?? verified('inquiry_property')
+    ?? input.facts.find((fact) => /property_address|showing_address|inquiry_property/i.test(fact.field))?.value
+    ?? null;
+  const hotScore = Number(verified('hot_score') ?? any('hot_score') ?? 0);
   const status = verified('property_status') ?? 'Unknown';
   const links = [
     link('REDFIN', verified('redfin_url')),
@@ -83,6 +89,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     live: false as const,
     owner: 'Kyle',
     blockedReason: null as string | null,
+    hotScore: Number.isFinite(hotScore) ? hotScore : 0,
   };
 
   const finish = (card: Omit<ExecutionCard, 'manualActionRequired' | 'approvalRequired' | 'live'> & { manualActionRequired?: true; approvalRequired?: true; live?: false }): ExecutionCard => {
@@ -91,6 +98,24 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       if (!draft) continue;
       const voice = screenKyleVoice(draft);
       if (!voice.allowed) throw new Error(`${input.name}: ${voice.reason}`);
+    }
+    const cma = overdueCma(input);
+    if (cma && !full.humanAction.includes('CMA NEEDED')) {
+      full.priority = Math.max(full.priority, 85);
+      full.humanAction = `${full.humanAction} CMA NEEDED. Reminder is overdue: ${cma}. PROPERTY: address not on file. Do not CMA an assumed property. RETRIEVE FROM: Agent Tools. LOOK FOR: the home to sell.`;
+      if (full.internalCode === 'needs_contact' || full.internalCode === 'property_first') full.internalCode = 'cma_needed';
+    }
+    if (!input.phone && full.internalCode !== 'do_not_contact') {
+      if (input.email && /^TEXT /.test(full.humanAction)) full.humanAction = full.humanAction.replace(/^TEXT /, 'EMAIL ');
+      if (!/GET .+ CELL/.test(full.humanAction)) {
+        full.humanAction = `${full.humanAction} GET ${input.name.toUpperCase()}'S CELL. WHERE TO LOOK: Agent Tools or Redfin.`;
+      }
+      if (input.email) full.priority = Math.max(full.priority, 72);
+      if (input.email && full.clientDraft && !full.emailDraft) {
+        full.emailDraft = full.clientDraft;
+        full.clientDraft = null;
+        full.emailSubject = full.emailSubject ?? (/saving /i.test(full.emailDraft) ? 'Your saved search' : 'The property you asked about');
+      }
     }
     return full;
   };
@@ -605,16 +630,19 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     });
   }
 
-  if (!input.phone) {
+  if (!input.phone && !input.email) {
+    const offerMention = /offer/i.test(`${any('recent_note') ?? ''} ${any('buying_activity') ?? ''}`);
     return finish({
       ...base,
       priority: 60,
-      whyNow: input.email ? 'No verified cell. Email is on file, so the buyer card is not blocked.' : 'No verified cell or email.',
+      whyNow: 'No verified cell or email.',
       humanAction: `GET ${input.name.toUpperCase()}'S CELL. WHERE TO LOOK: Agent Tools, Redfin, or another authorized source.`,
-      clientDraft: null,
+      clientDraft: property
+        ? `${first(input.name)}, Kyle with Redfin. I'm checking on ${property}. Is that still the one?`
+        : null,
       callOpening: null,
-      emailDraft: input.email ? `${first(input.name)}, sending this by email since I don't have a cell on file yet. Is ${property ?? 'the property you asked about'} the main one you want to see?` : null,
-      emailSubject: input.email ? 'The property you asked about' : null,
+      emailDraft: null,
+      emailSubject: null,
       waitFor: 'A verified cell, or an email reply.',
       ifYesNext: 'Use the channel they answer on.',
       ifNoNext: 'Keep looking in the authorized source.',
@@ -623,9 +651,11 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       askQualificationNow: false,
       showingState: showing.state,
       customerPropertyState: showing.customerState,
-      agentToolsNote: note('No verified cell. No number was invented.'),
+      agentToolsNote: note(offerMention
+        ? 'No verified cell. No number was invented. Agent Tools mentions an offer request. It is not a confirmed submission. The draft cannot be sent until a cell is on file.'
+        : 'No verified cell. No number was invented. The draft cannot be sent until a cell is on file.'),
       followUp: 'When a verified cell is added.',
-      blockedReason: input.email ? null : 'Verified contact is missing.',
+      blockedReason: 'Verified contact is missing.',
       internalCode: 'needs_contact',
     });
   }
@@ -1237,6 +1267,31 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
     });
   }
 
+  if (verified('saved_search') && !verified('property_address')) {
+    const search = verified('saved_search');
+    return finish({
+      ...base,
+      priority: 70,
+      whyNow: 'A saved search is on file. One question, tied to that search.',
+      humanAction: `TEXT ${input.name.toUpperCase()} NOW.`,
+      clientDraft: `${first(input.name)}, Kyle with Redfin. You're still saving ${search}. What's prompting the move?`,
+      callOpening: null,
+      emailDraft: null,
+      emailSubject: null,
+      waitFor: 'What is prompting the move.',
+      ifYesNext: 'One next question from that answer.',
+      ifNoNext: 'Stay on the search they already saved.',
+      ifUnclearNext: 'Ask the same question once.',
+      qualificationQuestion: 'What is prompting the move?',
+      askQualificationNow: true,
+      showingState: showing.state,
+      customerPropertyState: showing.customerState,
+      agentToolsNote: note('Saved search is on file. The cell may still be missing. Nothing was sent.'),
+      followUp: 'Their answer.',
+      internalCode: 'saved_search',
+    });
+  }
+
   const draft = property
     ? `${first(input.name)}, Kyle with Redfin. I'm checking on ${property} now. Is that the main one you want to see?`
     : `${first(input.name)}, Kyle with Redfin. What property should I look at first?`;
@@ -1263,11 +1318,21 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
   });
 }
 
+function overdueCma(input: DeskEvidence): string | null {
+  for (const fact of input.facts) {
+    if (fact.kind !== 'fact' || fact.verification !== 'verified') continue;
+    if (!/cma/i.test(`${fact.field} ${fact.value}`)) continue;
+    if (scheduledTourIsStale(fact.value, input.now)) return fact.value;
+  }
+  return null;
+}
+
 function deriveShowing(input: DeskEvidence, property: string | null): { state: string; customerState: string; associateOnly: boolean } {
   const verified = (field: string) => input.facts.find((fact) => fact.field === field && fact.kind === 'fact' && fact.verification === 'verified')?.value ?? null;
   const inference = input.facts.find((fact) => /associate_tour|coordinator_tour|coordinator_contact|showing_agent/i.test(fact.field) && fact.verification !== 'verified');
-  const scheduled = verified('scheduled_tour_note') ?? '';
-  const past = scheduled ? scheduledIsPast(scheduled, input.now) : false;
+  const scheduledFact = input.facts.find((fact) => fact.kind === 'fact' && fact.verification === 'verified' && scheduledTourLanguage(fact.field, fact.value));
+  const scheduled = verified('scheduled_tour_note') || scheduledFact?.value || '';
+  const past = scheduled ? scheduledTourIsStale(scheduled, input.now) : false;
   if (verified('showing_outcome') === 'completed' && /kyle/i.test(verified('showing_outcome_by') ?? '')) {
     return { state: 'SHOWING_COMPLETED', customerState: 'Completed', associateOnly: false };
   }
@@ -1280,24 +1345,6 @@ function deriveShowing(input: DeskEvidence, property: string | null): { state: s
   }
   if (scheduled && !past) return { state: 'ACCESS_PENDING', customerState: 'Scheduled', associateOnly: false };
   return { state: property ? 'UNKNOWN' : 'UNKNOWN', customerState: 'Unknown', associateOnly: false };
-}
-
-function scheduledIsPast(value: string, now: Date): boolean {
-  const timed = value.match(/\b(20\d{2}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
-  if (timed?.[1] && timed[2] && timed[3]) {
-    let hour = Number(timed[2]);
-    const minute = Number(timed[3]);
-    const mer = (timed[4] ?? '').toLowerCase();
-    if (mer === 'pm' && hour < 12) hour += 12;
-    if (mer === 'am' && hour === 12) hour = 0;
-    const instant = Date.parse(`${timed[1]}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00.000Z`);
-    return !Number.isNaN(instant) && instant < now.getTime();
-  }
-  const iso = value.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-  if (!iso?.[1]) return false;
-  const day = Date.parse(`${iso[1]}T00:00:00.000Z`);
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return day < today;
 }
 
 function link(label: string, url: string | null): ExecutionCard['links'][number] {
@@ -1324,7 +1371,7 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
     when,
     `Actionable clients: ${ordered.filter((card) => card.internalCode !== 'do_not_contact').length}`,
     `Showings needing outcome: ${ordered.filter((card) => card.showingState === 'OUTCOME_UNKNOWN').length}`,
-    `Missing contact: ${ordered.filter((card) => card.internalCode === 'needs_contact').length}`,
+    `Missing contact: ${ordered.filter((card) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction)).length}`,
     '',
     'DO THESE FIRST',
   ];
@@ -1364,8 +1411,8 @@ export function renderMorningBrief(cards: ExecutionCard[], now: Date): string {
     `FINANCING ITEMS: ${ordered.filter((card) => card.internalCode === 'needs_preapproval').length}`,
     `BUY AFTER SELL ITEMS: ${ordered.filter((card) => card.internalCode === 'sale_dependency').length}`,
     `CMAS NEEDED: ${ordered.filter((card) => card.internalCode === 'cma_needed').length}`,
-    `OFFERS AND OFFER REQUESTS: ${ordered.filter((card) => card.internalCode.startsWith('offer_')).length}`,
-    `CONTACT INFORMATION TO FIND: ${ordered.filter((card) => card.internalCode === 'needs_contact').length}`,
+    `OFFERS AND OFFER REQUESTS: ${ordered.filter((card) => card.internalCode.startsWith('offer_') || /offer request/i.test(card.agentToolsNote)).length}`,
+    `CONTACT INFORMATION TO FIND: ${ordered.filter((card) => card.internalCode === 'needs_contact' || /GET .+ CELL/.test(card.humanAction)).length}`,
     'Nothing was sent. Agent Tools was not written.',
   );
   return lines.join('\n');
