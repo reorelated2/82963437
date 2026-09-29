@@ -258,6 +258,7 @@ test('buildMorningBrief regenerates from the database', () => {
   const again = buildMorningBrief(db, NOW);
   assert.equal(again.generated, true);
   assert.match(again.text, /ECHO NIU/);
+  assert.match(again.text, /don't have a cell on file yet/);
   assert.ok(again.text.indexOf('ECHO NIU') < again.text.indexOf('ERENA VALLE'));
   assert.equal(again.cards[0]?.clientName, 'Echo Niu');
   assert.equal(again.cards.length, 7);
