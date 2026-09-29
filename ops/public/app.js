@@ -3,6 +3,7 @@ const state = {
   authed: false,
   view: 'today',
   workspace: null,
+  brief: null,
   contact: null,
   review: null,
   agentRun: null,
@@ -37,6 +38,17 @@ function route() {
   if (state.view === 'contact' && parts[1]) return openContact(decodeURIComponent(parts[1]));
   if (state.view === 'review' && parts[1]) return openReview(decodeURIComponent(parts[1]));
   if (state.view === 'today') return loadToday();
+  if (state.view === 'morning') return loadMorning();
+  render();
+}
+
+async function loadMorning() {
+  try {
+    state.brief = await api('/api/execution/brief');
+    state.view = 'morning';
+  } catch {
+    state.error = 'The morning brief could not load.';
+  }
   render();
 }
 
@@ -85,6 +97,7 @@ function shell() {
 function nav() {
   const bar = el('nav', { class: 'nav' });
   for (const item of [
+    ['morning', 'Morning'],
     ['today', 'Today'],
     ['new', 'New lead'],
     ['search', 'Search'],
@@ -122,12 +135,101 @@ function main() {
   if (state.notice) node.append(el('div', { class: 'notice', id: 'notice', text: state.notice }));
   if (state.error) node.append(el('div', { class: 'error', id: 'error', text: state.error }));
   if (state.view === 'login') node.append(loginView());
+  if (state.view === 'morning') node.append(morningView());
   if (state.view === 'today') node.append(todayView());
   if (state.view === 'new') node.append(newLeadView());
   if (state.view === 'review') node.append(reviewView());
   if (state.view === 'contact') node.append(contactView());
   if (state.view === 'search' || state.view === 'queue') node.append(state.view === 'queue' ? queueView() : searchView());
   return node;
+}
+
+function morningView() {
+  const data = state.brief;
+  const wrap = el('div', { class: 'stack morning' });
+  wrap.append(el('h2', { class: 'headline', text: 'Morning Execution Brief' }));
+  wrap.append(el('p', { class: 'rule', text: 'Drafts stay here. Copy and Open do not send. Mark updates KyleOS only.' }));
+  wrap.append(el('button', {
+    type: 'button',
+    class: 'primary',
+    text: 'Load synthetic Hot 7',
+    onclick: async () => {
+      state.brief = await api('/api/execution/hot7', { method: 'POST', body: '{}' });
+      state.notice = 'Synthetic Hot 7 brief generated. Nothing was sent.';
+      render();
+    },
+  }));
+  if (!data) {
+    wrap.append(el('p', { text: 'Loading the brief.' }));
+    return wrap;
+  }
+  wrap.append(el('pre', { class: 'brief-text', id: 'morning-brief', text: data.text }));
+  for (const card of data.cards || []) {
+    const box = el('article', { class: 'exec-card' });
+    box.append(
+      el('h3', { text: `${card.priority}. ${card.clientName}` }),
+      el('p', { text: card.whyNow }),
+      el('p', { class: 'action', text: card.humanAction }),
+    );
+    if (card.clientDraft) box.append(copyButton('COPY CLIENT TEXT', card.clientDraft));
+    if (card.callOpening) box.append(copyButton('COPY CALL OPENING', card.callOpening));
+    if (card.emailDraft) box.append(copyButton('COPY EMAIL', card.emailDraft));
+    if (card.agentToolsNote) box.append(copyButton('COPY AGENT TOOLS NOTE', card.agentToolsNote));
+    for (const link of card.links || []) {
+      box.append(openButton(link));
+    }
+    for (const mark of [
+      ['sent_manually', 'MARK SENT MANUALLY'],
+      ['called', 'MARK CALLED'],
+      ['agent_tools_updated', 'MARK AGENT TOOLS UPDATED'],
+      ['waiting', 'MARK WAITING FOR RESPONSE'],
+      ['showing_completed', 'MARK SHOWING COMPLETED'],
+      ['showing_cancelled', 'MARK SHOWING CANCELLED'],
+      ['offer_submitted', 'MARK OFFER SUBMITTED'],
+    ]) {
+      box.append(el('button', {
+        type: 'button',
+        class: 'mark',
+        text: mark[1],
+        disabled: !card.opportunityId,
+        onclick: () => markCard(card.opportunityId, mark[0]),
+      }));
+    }
+    wrap.append(box);
+  }
+  return wrap;
+}
+
+function copyButton(label, value) {
+  return el('button', {
+    type: 'button',
+    class: 'primary',
+    text: label,
+    onclick: () => copyText(value),
+  });
+}
+
+function openButton(link) {
+  const verified = link.status === 'verified' && typeof link.url === 'string' && link.url.startsWith('https://');
+  return el('button', {
+    type: 'button',
+    class: 'primary',
+    text: verified ? `OPEN ${link.label}` : `${link.label} LINK NOT FOUND`,
+    disabled: !verified,
+    onclick: () => {
+      if (!verified) return;
+      window.open(link.url, '_blank', 'noopener');
+    },
+  });
+}
+
+async function markCard(opportunityId, mark) {
+  const result = await api('/api/execution/mark', {
+    method: 'POST',
+    body: JSON.stringify({ opportunityId, mark }),
+  });
+  state.notice = result.reason || 'KyleOS updated. Nothing was sent.';
+  await loadMorning();
 }
 
 function todayView() {

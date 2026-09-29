@@ -108,6 +108,12 @@ test('buyer stages, readiness flags, and financing states match the desk model',
     'PREQUALIFIED',
     'PREAPPROVED',
     'FINANCING_READY',
+    'FINANCING_UNKNOWN_STATUS',
+    'NEEDS_PREAPPROVAL',
+    'LENDER_INTRO_OFFERED',
+    'LENDER_INTRO_ACCEPTED',
+    'PREAPPROVAL_IN_PROCESS',
+    'FINANCING_ISSUE',
   ]);
 });
 

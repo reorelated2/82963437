@@ -11,6 +11,7 @@ import {
   type FactInput,
 } from '../canonical.ts';
 import { nextBestAction, openBuyerFile } from '../conversion/engine.ts';
+import { recordLeadSource } from '../execution/source.ts';
 import { FINANCING_STATES, PRIMARY_STAGES, SEARCH_STATES, type FinancingState, type SearchState } from '../conversion/policy.ts';
 import { sendFlags } from '../mode.ts';
 import { text, type SqlDb } from '../sql.ts';
@@ -293,6 +294,14 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
 
   openBuyerFile(db, { opportunityId: ingested.opportunityId, now });
   applyVerifiedState(db, ingested.opportunityId, facts, now);
+  recordLeadSource(db, {
+    clientId: ingested.clientId,
+    opportunityId: ingested.opportunityId,
+    sourceSystem: 'redfin_agent_tools',
+    leadSource: verifiedValue(facts, 'lead_source'),
+    sourceIdentifier: record.source.source_id,
+    now,
+  });
   const action = nextBestAction(db, ingested.opportunityId, now);
   const note = factualCrmNote(record, facts);
   recordCanonicalEvent(db, {
