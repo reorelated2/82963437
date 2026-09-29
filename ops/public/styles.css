@@ -161,7 +161,7 @@ textarea { min-height: 220px; resize: vertical; }
   position: fixed;
   left: 0; right: 0; bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: var(--paper);
   border-top: 1px solid var(--line);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
@@ -171,6 +171,7 @@ textarea { min-height: 220px; resize: vertical; }
   border: 0;
   padding: 10px 4px;
   color: var(--muted);
+  font-size: 0.78rem;
 }
 .nav button.active { color: var(--teal-deep); font-weight: 700; }
 .search-results { display: grid; gap: 8px; margin-top: 12px; }
@@ -196,3 +197,29 @@ textarea { min-height: 220px; resize: vertical; }
   .sections .wide { grid-column: 1 / -1; }
 }
 .trace-step { margin: 8px 0; }
+.morning .exec-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+.morning .action { font-weight: 700; }
+.morning button {
+  min-height: 48px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--teal);
+  background: var(--paper);
+}
+.morning button.primary { background: var(--teal); color: white; }
+.morning button:disabled { opacity: 0.55; }
+.brief-text {
+  white-space: pre-wrap;
+  font-family: var(--sans);
+  font-size: 15px;
+  background: var(--paper);
+  padding: 12px;
+  border-radius: 12px;
+}

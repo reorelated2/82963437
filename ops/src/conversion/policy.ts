@@ -43,6 +43,12 @@ export const FINANCING_STATES = [
   'PREQUALIFIED',
   'PREAPPROVED',
   'FINANCING_READY',
+  'FINANCING_UNKNOWN_STATUS',
+  'NEEDS_PREAPPROVAL',
+  'LENDER_INTRO_OFFERED',
+  'LENDER_INTRO_ACCEPTED',
+  'PREAPPROVAL_IN_PROCESS',
+  'FINANCING_ISSUE',
 ] as const;
 
 export type FinancingState = (typeof FINANCING_STATES)[number];
@@ -107,6 +113,33 @@ export const BANNED_PHRASES = [
   "i'm paid on your satisfaction",
   'i’m paid on your satisfaction',
 ];
+
+/** Client-facing execution drafts. Existing outbound tests keep the shorter list above. */
+export const KYLE_VOICE_BANNED = [
+  ...BANNED_PHRASES,
+  'following up',
+  'just wanted to',
+  'checking in',
+  "hope you're doing well",
+  'hope you’re doing well',
+  'hope this finds you well',
+  'please do not hesitate',
+  'happy to answer any questions',
+  'thrilled',
+  'excited to share',
+  'dream home',
+  'seamless process',
+  'unique opportunity',
+];
+
+export function screenKyleVoice(body: string): { allowed: boolean; reason: string } {
+  if (/[—–]/.test(body)) return { allowed: false, reason: 'Em dashes are not used in Kyle drafts.' };
+  const lowered = body.toLowerCase();
+  for (const phrase of KYLE_VOICE_BANNED) {
+    if (lowered.includes(phrase)) return { allowed: false, reason: `Banned phrase: ${phrase}` };
+  }
+  return { allowed: true, reason: 'Draft matches the voice rules. Nothing was sent.' };
+}
 
 const SENSITIVE_DOCS = /\b(ssn|social security|tax returns?|w-2|w2|bank statements?|pay stubs?|account numbers?)\b/i;
 
