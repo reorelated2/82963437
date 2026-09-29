@@ -1371,7 +1371,7 @@ export function planDesk(input: DeskEvidence): ExecutionCard {
       askQualificationNow: true,
       showingState: showing.state,
       customerPropertyState: showing.customerState,
-      agentToolsNote: note('Saved search is on file. The cell may still be missing. Nothing was sent.'),
+      agentToolsNote: note('Saved search is on file. The cell may still be missing.'),
       followUp: 'Their answer.',
       internalCode: 'saved_search',
     });
@@ -1435,7 +1435,7 @@ function searchPlanFor(input: DeskEvidence): ExecutionCard['searchPlan'] {
   if (!raw) return { mode: 'none', required: 'none on file', preferred: 'none on file', doNotFilter: 'Do not invent filters.' };
   const parts = raw.split(/\s+and\s+/i).map((part) => part.trim()).filter(Boolean);
   if (parts.length > 1) {
-    return { mode: 'conflict', required: 'Not set. The searches conflict.', preferred: 'Not set', doNotFilter: parts.join(' | ') };
+    return { mode: 'conflict', required: 'Not set. The searches conflict', preferred: 'Not set', doNotFilter: parts.join(' | ') };
   }
   return { mode: 'create', required: raw, preferred: 'None stated', doNotFilter: 'Price, beds, and baths that are not in the saved search.' };
 }
