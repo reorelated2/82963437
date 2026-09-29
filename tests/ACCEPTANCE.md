@@ -23,6 +23,8 @@ Section 15 of the core prompt names nine release tests. Each has an executed cas
 | Source changes after plan is made | Passed. Ownership change sent nothing further to the old number. |
 | Lead reassigned before execution | Passed. Record owner stays Kyle Kleinman, stage `ownership_paused`, later reply still blocked. Ownership is not overwritten. |
 | Access approved, buyer acknowledgment absent | Passed. Missing checkpoint kept with owner `buyer`. Not fully confirmed. |
+| Conflicting identity | Passed. A shared email on a second phone is held. Nothing merged. One send total. |
+| Changed appointment | Passed. A new time clears access, notification, and acknowledgment. Not fully confirmed. No stale access reminder. |
 | Listing source unavailable or stale | Passed. Note names the last verified timestamp. Status not invented. No send. |
 | Inspection complete, payment absent | Passed. `fieldOrderStatus` keeps completion, invoicing, and payment separate. No overdue claim without terms. |
 | Coordinator contact only | Passed. Note says Kyle did not call or speak with the buyer. |
