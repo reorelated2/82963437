@@ -157,11 +157,35 @@ textarea { min-height: 220px; resize: vertical; }
 }
 .fact b { font-weight: 600; }
 .needed { color: var(--clay); }
+.priority {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.do-this {
+  font-family: var(--serif);
+  font-size: 1.55rem;
+  line-height: 1.15;
+  margin: 8px 0;
+}
+.draft-flag { color: var(--clay); font-weight: 700; }
+.thumb, .link-btn {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  text-align: center;
+}
+.link-btn { padding: 12px 16px; border-radius: 999px; }
+.brief-card { scroll-margin-top: 12px; }
+.summary-line { margin: 8px 0; }
 .nav {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: var(--paper);
   border-top: 1px solid var(--line);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
@@ -169,8 +193,9 @@ textarea { min-height: 220px; resize: vertical; }
 .nav button {
   background: transparent;
   border: 0;
-  padding: 10px 4px;
+  padding: 10px 2px;
   color: var(--muted);
+  font-size: 0.82rem;
 }
 .nav button.active { color: var(--teal-deep); font-weight: 700; }
 .search-results { display: grid; gap: 8px; margin-top: 12px; }

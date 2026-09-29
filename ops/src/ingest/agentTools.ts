@@ -11,6 +11,7 @@ import {
   type FactInput,
 } from '../canonical.ts';
 import { nextBestAction, openBuyerFile } from '../conversion/engine.ts';
+import { prepareExecution } from '../conversion/execution.ts';
 import { FINANCING_STATES, PRIMARY_STAGES, SEARCH_STATES, type FinancingState, type SearchState } from '../conversion/policy.ts';
 import { sendFlags } from '../mode.ts';
 import { text, type SqlDb } from '../sql.ts';
@@ -294,6 +295,7 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
   openBuyerFile(db, { opportunityId: ingested.opportunityId, now });
   applyVerifiedState(db, ingested.opportunityId, facts, now);
   const action = nextBestAction(db, ingested.opportunityId, now);
+  prepareExecution(db, ingested.opportunityId, now);
   const note = factualCrmNote(record, facts);
   recordCanonicalEvent(db, {
     idempotencyKey: `${key}:provenance`,
@@ -390,6 +392,7 @@ function finishHeld(
       now.toISOString(),
       held.opportunityId,
     );
+    if (held.opportunityId) prepareExecution(db, held.opportunityId, now);
     recordCanonicalEvent(db, {
       idempotencyKey: `agent-tools:${record.record_id}:provenance`,
       clientId: held.clientId,

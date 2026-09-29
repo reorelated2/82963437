@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { text, transaction, type SqlDb } from '../sql.ts';
+import { appointmentHasPassed } from '../time.ts';
 import { enqueueApproval, cancelPendingApprovals } from './approval.ts';
 import { isOpportunityDoNotContact } from './guards.ts';
 import {
@@ -886,6 +887,7 @@ function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
   if (kyleVerified) return null;
 
   let scheduled = '';
+  let pastScheduled = '';
   let requested = '';
   let zeroCompleted = false;
   let coordinator = false;
@@ -901,7 +903,8 @@ function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
     if (field === 'tours_completed' && /^0+(\.0+)?$/.test(value.trim())) zeroCompleted = true;
     if (/coordinator|showing agent/i.test(value)) coordinator = true;
     if (verifiedFact && scheduledTourLanguage(field, value)) {
-      scheduled = `${field}: ${value}`;
+      if (appointmentHasPassed(value, now)) pastScheduled = pastScheduled || `${field}: ${value}`;
+      else scheduled = `${field}: ${value}`;
       continue;
     }
     if (tourRequestLanguage(field, value)) {
@@ -924,7 +927,9 @@ function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
     const actor = text(row, 'actor');
     if (/coordinator|showing agent/i.test(`${actor} ${note}`)) coordinator = true;
     if (kind === 'event_scheduled' && state === 'scheduled') {
-      scheduled = scheduled || `Activity event_scheduled is scheduled only. ${note}`.trim();
+      const line = `Activity event_scheduled is scheduled only. ${note}`.trim();
+      if (appointmentHasPassed(`${note} ${line}`, now)) pastScheduled = pastScheduled || line;
+      else scheduled = scheduled || line;
     }
     if (kind === 'showing_requested' || state === 'requested') {
       requested = requested || `Activity ${kind} is requested only. ${note}`.trim();
@@ -978,6 +983,28 @@ function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
       readinessEvidence: 'Requested only. Not scheduled, not confirmed, and not completed.',
       followUpTrigger: 'tour_request',
       confidence: 'medium',
+    };
+  }
+  if (pastScheduled) {
+    const reasons = [
+      'A past scheduled tour is not an upcoming tour. The outcome is unknown.',
+    ];
+    if (coordinator) reasons.push('A coordinator or showing-agent tour is not a tour with Kyle.');
+    else reasons.push('No one has confirmed the showing happened.');
+    reasons.push(guard);
+    const evidence = [`past scheduled tour, outcome unknown: ${clip(pastScheduled)}`];
+    if (recentInference) evidence.push(`unverified recent tour: ${clip(recentInference)}`);
+    return {
+      actionType: 'tour_follow_up',
+      tourState: 'unverified',
+      score: 74,
+      bucket: 'TODAY',
+      reason: 'The scheduled time has passed and the showing outcome is not confirmed.',
+      reasons,
+      evidence,
+      readinessEvidence: 'POST TOUR VERIFICATION NEEDED. Outcome unknown. Not confirmed and not completed.',
+      followUpTrigger: 'tour_follow_up',
+      confidence: 'low',
     };
   }
   if (recentInference) {

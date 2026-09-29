@@ -1,6 +1,7 @@
 import { text, type SqlDb } from '../sql.ts';
 
 export const CONVERSION_MIGRATION_ID = '2026-09-29-conversion';
+export const EXECUTION_MIGRATION_ID = '2026-09-29-execution-actions';
 
 const TABLES = `
 CREATE TABLE IF NOT EXISTS intake_answers (
@@ -156,6 +157,15 @@ CREATE TABLE IF NOT EXISTS approval_queue (
   dedupe_key TEXT NOT NULL UNIQUE
 );
 
+CREATE TABLE IF NOT EXISTS execution_actions (
+  opportunity_id TEXT PRIMARY KEY REFERENCES opportunities(id) ON DELETE CASCADE,
+  client_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  manual_status TEXT NOT NULL DEFAULT 'draft',
+  updated_at TEXT NOT NULL,
+  live INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS activity_log (
   id TEXT PRIMARY KEY,
   opportunity_id TEXT NOT NULL,
@@ -220,6 +230,14 @@ export function applyConversionSchema(db: SqlDb, now = new Date()): void {
     db.run(
       `INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)`,
       CONVERSION_MIGRATION_ID,
+      now.toISOString(),
+    );
+  }
+  const execution = db.get(`SELECT id FROM schema_migrations WHERE id = ?`, EXECUTION_MIGRATION_ID);
+  if (!execution) {
+    db.run(
+      `INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)`,
+      EXECUTION_MIGRATION_ID,
       now.toISOString(),
     );
   }
