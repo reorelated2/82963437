@@ -153,8 +153,8 @@ function briefView() {
   }
   wrap.append(
     el('h2', { class: 'headline', text: 'KYLEOS MORNING BRIEF' }),
-    el('p', { class: 'detail', text: `${data.generatedAt || ''} Eastern. DRY_RUN. Nothing on this screen was sent.` }),
-    el('p', { class: 'rule', text: 'Copy copies. Open opens a verified link. Mark records only what you say you did. KyleOS did not text, email, call, or update Agent Tools.' }),
+    el('p', { class: 'detail', id: 'brief-clock', text: `${data.generatedAtEt || data.generatedAt || ''} · ${data.clock === 'test' ? 'Test clock' : 'Production clock, America/New_York'}. DRY_RUN. Nothing on this screen was sent.` }),
+    el('p', { class: 'rule', text: 'Copy copies. Open opens a verified link. Call uses the phone dialer. Mark records only what you say you did. KyleOS did not text, email, call, or update Agent Tools.' }),
   );
   const cards = data.cards || [];
   if (cards.length === 0) wrap.append(el('p', { class: 'empty', text: 'No open clients on this desk.' }));
@@ -191,8 +191,10 @@ function briefCard(card) {
   const cardEl = el('article', { class: 'card brief-card', id: `card-${slug(card.client_name)}` });
   cardEl.append(
     el('p', { class: 'priority', text: `PRIORITY ${card.priority} — ${card.client_name}` }),
+    el('p', { class: 'tier', text: `${card.priority_tier || 'T2'} · ${card.horizon || 'short'}` }),
     el('p', { class: 'do-this', text: card.human_headline }),
     el('p', { text: card.why_now }),
+    el('p', { class: 'how', text: card.execution_steps || '' }),
     el('p', { text: `Do this: ${card.primary_action}` }),
     el('p', { text: `Where: ${card.where}` }),
     el('p', { text: `Property: ${card.property_address || 'DATA NEEDED'}` }),
@@ -203,8 +205,11 @@ function briefCard(card) {
     el('p', { text: `If yes: ${card.if_yes_next}` }),
     el('p', { text: `If no: ${card.if_no_next}` }),
     el('p', { text: `Next question: ${card.next_qualification_question || 'None.'} ${card.ask_qualification_now ? '' : 'Do not ask yet.'}` }),
-    el('p', { class: 'draft-flag', text: `${card.draft_status} / MANUAL ACTION REQUIRED. Not sent.` }),
+    el('p', { class: 'draft-flag', text: `${card.draft_status} / MANUAL ACTION REQUIRED. Not sent. Evidence: ${card.evidence_label || 'NONE'}.` }),
   );
+  if (card.promise) cardEl.append(el('p', { class: 'needed', text: `Promise: ${card.promise}` }));
+  if (card.waiting_on) cardEl.append(el('p', { text: `Waiting on ${card.waiting_on}. ${card.waiting_reason || ''}` }));
+  if (card.workflow_drift) cardEl.append(el('p', { class: 'needed', text: 'WORKFLOW DRIFT. This file has no concrete next step.' }));
   if (card.client_draft) cardEl.append(el('p', { class: 'message', text: card.client_draft }));
   if (card.email_draft) cardEl.append(el('p', { class: 'message', text: `${card.email_subject || ''}\n${card.email_draft}` }));
   if (card.listing_agent_draft) cardEl.append(el('p', { class: 'message', text: card.listing_agent_draft }));
@@ -220,7 +225,12 @@ function briefCard(card) {
     openThumb('Open Redfin property', card.property_redfin_url),
     openThumb('Open Agent Tools', card.agent_tools_url),
     thumb('Copy Agent Tools note', Boolean(card.agent_tools_note_draft), () => copyExact(card.agent_tools_note_draft, 'Note copied. Agent Tools was not updated.')),
+    callThumb(card),
     thumb('Mark sent manually', true, () => markCard(card, 'sent')),
+    thumb('Client replied', true, () => markCard(card, 'client_replied')),
+    thumb('No reply', true, () => markCard(card, 'no_reply')),
+    thumb('Showing occurred', true, () => markCard(card, 'showing_occurred')),
+    thumb('Showing did not occur', true, () => markCard(card, 'showing_did_not_occur')),
     thumb('Mark called', true, () => markCard(card, 'called')),
     thumb('Mark Agent Tools updated', true, () => markCard(card, 'agent_tools_updated')),
     thumb('Mark waiting for response', true, () => markCard(card, 'waiting')),
@@ -249,6 +259,13 @@ function thumb(label, enabled, onclick) {
     disabled: !enabled,
     onclick: enabled ? onclick : undefined,
   });
+}
+
+function callThumb(card) {
+  if (card.action_channel !== 'call' || !card.call_href) {
+    return el('button', { type: 'button', class: 'primary thumb', text: 'Call: no verified number', disabled: true });
+  }
+  return el('a', { class: 'primary thumb link-btn', href: card.call_href, text: `Call ${card.verified_phone}` });
 }
 
 function openThumb(label, url) {

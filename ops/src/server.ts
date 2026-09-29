@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { listAgentRuns, runInquiryAgent, getAgentRun } from './agent.ts';
 import { ingestCanonicalLead, type FactInput } from './canonical.ts';
-import { buildMorningBrief, markManual } from './conversion/execution.ts';
+import { buildMorningBrief, markManual, productionClock } from './conversion/execution.ts';
 import { sendFlags } from './mode.ts';
 import { clearCookieHeader, cookieHeader, login, sessionValid } from './auth.ts';
 import { openDatabase } from './db.ts';
@@ -119,7 +119,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, db: SqlDb, dbPa
     return sendJson(res, 401, { error: 'Sign in required.' });
   }
   if (method === 'GET' && path === '/api/workspace') return sendJson(res, 200, getWorkspace(db));
-  if (method === 'GET' && path === '/api/morning-brief') return sendJson(res, 200, buildMorningBrief(db));
+  if (method === 'GET' && path === '/api/morning-brief') return sendJson(res, 200, buildMorningBrief(db, productionClock(), 'production'));
   if (method === 'POST' && path.startsWith('/api/execution/') && path.endsWith('/mark')) {
     const body = await readJson(req);
     const id = decodeURIComponent(path.slice('/api/execution/'.length, -'/mark'.length));

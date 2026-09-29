@@ -157,12 +157,13 @@ textarea { min-height: 220px; resize: vertical; }
 }
 .fact b { font-weight: 600; }
 .needed { color: var(--clay); }
-.priority {
+.priority, .tier {
   margin: 0;
   font-size: 0.78rem;
   letter-spacing: 0.06em;
   color: var(--muted);
 }
+.how { margin: 0 0 8px; }
 .do-this {
   font-family: var(--serif);
   font-size: 1.55rem;

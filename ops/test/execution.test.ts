@@ -80,16 +80,16 @@ test('Hot 7 fixture becomes a morning brief through the real loader', () => {
   assert.equal(loaded.applied, true);
   assert.equal(loaded.liveSend, false);
   assert.equal(loaded.results.length, 7);
-  const brief = buildMorningBrief(db, NOW);
+  const brief = buildMorningBrief(db, NOW, 'test');
   const names = brief.cards.map((card) => card.client_name);
   assert.deepEqual(names, [
     'Echo Niu',
     'Erena & Rick Valle',
     'Claudia Pinheiro',
     'Alberto Alonso',
+    'Katherine De Armas',
     'Mark Maccagno',
     'Perry Crawford',
-    'Katherine De Armas',
   ]);
   const echo = brief.cards[0]!;
   assert.equal(echo.priority, 1);
@@ -111,6 +111,9 @@ test('Hot 7 fixture becomes a morning brief through the real loader', () => {
   assert.match(echo.agent_tools_note_draft, /Do not paste that note before the text is actually sent/);
   assert.doesNotMatch(echo.human_headline, /confirm_tour_details|pending_enrichment/);
   assert.equal(echo.sent, false);
+  assert.match(brief.text, /Clock: test freeze/);
+  assert.equal(brief.clock, 'test');
+  assert.equal(echo.priority_tier, 'T0');
   assert.match(brief.text, /KYLEOS MORNING BRIEF/);
   assert.match(brief.text, /LINK NOT FOUND/);
   assert.match(brief.text, /DATA NEEDED/);
@@ -143,7 +146,15 @@ test('Hot 7 fixture becomes a morning brief through the real loader', () => {
   assert.match(alberto.email_draft ?? '', /what is prompting the move/i);
   assert.equal(alberto.client_draft, null);
 
-  const mark = brief.cards[4]!;
+  const katherine = brief.cards[4]!;
+  assert.match(katherine.human_headline, /CMA NEEDED/);
+  assert.match(katherine.primary_action, /DATA NEEDED/);
+  assert.equal(katherine.property_address, null);
+  assert.ok(katherine.summary_buckets.includes('cma'));
+  assert.ok(katherine.summary_buckets.includes('missing_contact'));
+  assert.equal(katherine.priority_tier, 'T2');
+
+  const mark = brief.cards[5]!;
   assert.match(mark.human_headline, /GET MARK'S CELL/);
   assert.equal(mark.draft_status, 'BLOCKED');
   assert.match(mark.why_now, /not submitted/i);
@@ -152,17 +163,12 @@ test('Hot 7 fixture becomes a morning brief through the real loader', () => {
   assert.equal(count(db, `SELECT COUNT(*) AS n FROM next_best_actions WHERE opportunity_id = '${mark.opportunityId}'`), 0);
   assert.ok(mark.summary_buckets.includes('offers'));
 
-  const perry = brief.cards[5]!;
+  const perry = brief.cards[6]!;
   assert.match(perry.primary_action, /Prefers text/);
   assert.equal(perry.draft_status, 'BLOCKED');
   assert.match(perry.client_draft ?? '', /Coral Gables multi-family/);
-
-  const katherine = brief.cards[6]!;
-  assert.match(katherine.human_headline, /CMA NEEDED/);
-  assert.match(katherine.primary_action, /DATA NEEDED/);
-  assert.equal(katherine.property_address, null);
-  assert.ok(katherine.summary_buckets.includes('cma'));
-  assert.ok(katherine.summary_buckets.includes('missing_contact'));
+  assert.equal(mark.priority_tier, 'T3');
+  assert.equal(perry.priority_tier, 'T3');
 
   assert.equal(count(db, `SELECT COUNT(*) AS n FROM sent_messages`), 0);
   assert.equal(count(db, `SELECT COUNT(*) AS n FROM communication_log`), 0);

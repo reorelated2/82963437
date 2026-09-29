@@ -5,9 +5,9 @@ import { QUESTIONS, detectHandoff, screenNextAction, type IntakeField } from './
 import { isChannelOptOut } from '../comms/consent.ts';
 import { recordCanonicalEvent } from '../canonical.ts';
 import { liveChannelPermitted, sendFlags } from '../mode.ts';
-import { formatPhone } from '../money.ts';
 import { text, type SqlDb } from '../sql.ts';
-import { appointmentInstant, formatEt, weekdayLong, zonedLocalToUtc, zonedParts } from '../time.ts';
+import { formatPhone, phoneKey } from '../money.ts';
+import { appointmentInstant, formatEt, sameEtDay, weekdayLong, zonedLocalToUtc, zonedParts } from '../time.ts';
 
 /**
  * Human execution cards sit on the existing opportunity, next-best-action, and
@@ -107,11 +107,24 @@ export interface ExecutionAction {
   summary_buckets: string[];
   manual_marks: ManualMark[];
   approval_id: string | null;
+  priority_tier: 'T0' | 'T1' | 'T2' | 'T3';
+  horizon: 'short' | 'mid' | 'long';
+  waiting_on: 'CLIENT' | 'LISTING_SIDE' | 'LENDER' | 'TITLE' | 'VENDOR' | 'KYLE' | null;
+  waiting_reason: string | null;
+  waiting_next_check: string | null;
+  execution_adapter: string;
+  execution_steps: string;
+  call_href: string | null;
+  evidence_label: 'NONE' | 'MARKED BY KYLE' | 'VERIFIED BY INTEGRATION';
+  workflow_drift: boolean;
+  promise: string | null;
 }
 
 export interface MorningBrief {
   text: string;
   generatedAt: string;
+  generatedAtEt: string;
+  clock: 'production' | 'test';
   timezone: 'America/New_York';
   live: false;
   sent: false;
@@ -184,7 +197,12 @@ export function prepareExecution(db: SqlDb, opportunityId: string, now = new Dat
   return action;
 }
 
-export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
+/** The production desk clock. Tests pass their own Date. Production never uses a fixture instant. */
+export function productionClock(): Date {
+  return new Date();
+}
+
+export function buildMorningBrief(db: SqlDb, now = productionClock(), clock: 'production' | 'test' = 'production'): MorningBrief {
   const sellerIds = new Set(db.all(`SELECT seller_opportunity_id FROM opportunity_links`).map((row) => text(row, 'seller_opportunity_id')));
   const ids = db.all(`SELECT id FROM opportunities WHERE status = 'open'`).map((row) => text(row, 'id')).filter((id) => !sellerIds.has(id));
   const cards = ids.map((id) => prepareExecution(db, id, now));
@@ -193,8 +211,10 @@ export function buildMorningBrief(db: SqlDb, now = new Date()): MorningBrief {
     card.priority = index + 1;
   });
   return {
-    text: renderMorningBrief(ranked, now),
+    text: renderMorningBrief(ranked, now, clock),
     generatedAt: now.toISOString(),
+    generatedAtEt: formatEt(now),
+    clock,
     timezone: 'America/New_York',
     live: false,
     sent: false,
@@ -218,6 +238,9 @@ export function markManual(db: SqlDb, opportunityId: string, mark: string, now =
 } {
   const allowed = new Set([
     'sent', 'called', 'agent_tools_updated', 'waiting', 'showing_completed', 'showing_cancelled', 'offer_submitted',
+    'client_replied', 'no_reply', 'call_completed', 'showing_occurred', 'showing_did_not_occur',
+    'interested', 'not_interested', 'wants_offer', 'needs_financing', 'needs_to_sell',
+    'contact_found', 'property_unavailable', 'listing_appointment_set',
   ]);
   if (!allowed.has(mark)) {
     return { ok: false, message: 'That mark is not a KyleOS manual status.', providerConfirmed: false, sent: false };
@@ -243,16 +266,25 @@ export function markManual(db: SqlDb, opportunityId: string, mark: string, now =
     opportunityId,
     kind: 'manual_mark',
     now,
-    payload: { mark, providerConfirmed: false, sent: false, writtenToAgentTools: false, note },
+    payload: { mark, providerConfirmed: false, sent: false, writtenToAgentTools: false, evidence: 'MARKED BY KYLE', note },
   });
-  return { ok: true, message: note, providerConfirmed: false, sent: false };
+  const refreshed = prepareExecution(db, opportunityId, now);
+  return {
+    ok: true,
+    message: `${note} Next: ${refreshed.human_headline}. Evidence: MARKED BY KYLE. Not verified by an integration.`,
+    providerConfirmed: false,
+    sent: false,
+  };
 }
 
-export function renderMorningBrief(cards: ExecutionAction[], now: Date): string {
+export function renderMorningBrief(cards: ExecutionAction[], now: Date, clock: 'production' | 'test' = 'production'): string {
   const lines: string[] = [
     'KYLEOS MORNING BRIEF',
     `Date: ${formatEt(now)}`,
     `Current Eastern Time: ${formatEt(now)}`,
+    clock === 'production'
+      ? 'Clock: production. America/New_York. This is the real current time.'
+      : 'Clock: test freeze. America/New_York. Not the production clock.',
     'Mode: DRY_RUN. Nothing in this brief was sent.',
     `Actionable clients: ${cards.length}`,
     `Showings today: ${count(cards, 'showings_today')}`,
@@ -300,6 +332,9 @@ const SUMMARY_LABELS: Array<{ key: string; label: string }> = [
   { key: 'waiting_client', label: 'WAITING ON CLIENT' },
   { key: 'waiting_listing', label: 'WAITING ON LISTING SIDE' },
   { key: 'overdue', label: 'OVERDUE ACTIONS' },
+  { key: 'promises', label: 'PROMISES OWED BY KYLE' },
+  { key: 'workflow_drift', label: 'WORKFLOW DRIFT' },
+  { key: 'waiting_kyle', label: 'WAITING ON KYLE' },
 ];
 
 function renderCard(card: ExecutionAction): string {
@@ -347,6 +382,13 @@ function renderCard(card: ExecutionAction): string {
     `OWNER: ${card.owner}`,
     `BLOCKED: ${card.blocked_reason ?? 'none'}`,
     `DRAFT STATUS: ${card.draft_status} / MANUAL ACTION REQUIRED`,
+    `TIER: ${card.priority_tier} ${card.horizon}`,
+    `HOW: ${card.execution_steps}`,
+    `WAITING: ${card.waiting_on ? `${card.waiting_on}. ${card.waiting_reason ?? ''}`.trim() : 'none'}`,
+    `PROMISE: ${card.promise ?? 'none'}`,
+    `EVIDENCE: ${card.evidence_label}`,
+    `CALL LINK: ${card.call_href ?? 'none'}`,
+    `DRIFT: ${card.workflow_drift ? 'WORKFLOW DRIFT' : 'no'}`,
     'SENT: no. Provider confirmation: no.',
     `FUNDING: ${card.funding_type}`,
     `PREAPPROVAL: ${card.preapproval_state}`,
@@ -368,7 +410,7 @@ function decide(loaded: Loaded, now: Date): ExecutionAction {
   if (loaded.dueAt && loaded.dueAt < now.toISOString()) buckets.add('overdue');
 
   const safety = safetyDecision(loaded, message);
-  const choice = safety ?? contentDecision(loaded, message, now) ?? serviceDecision(loaded, now) ?? qualificationDecision(loaded, message);
+  const choice = safety ?? contentDecision(loaded, message, now) ?? serviceDecision(loaded, now) ?? qualificationDecision(loaded, message, now);
   Object.assign(base, choice.fields);
   base.summary_buckets = [...new Set([...choice.buckets, ...buckets, ...choice.fields.summary_buckets ?? []])];
   base.agent_tools_note_draft = choice.note ?? defaultNote(base, now);
@@ -377,6 +419,7 @@ function decide(loaded: Loaded, now: Date): ExecutionAction {
   if (base.listing_agent_draft) base.listing_agent_draft = cleanCopy(base.listing_agent_draft);
   if (base.call_opening) base.call_opening = cleanCopy(base.call_opening);
   applyChannelBlocks(base);
+  applyOperations(loaded, base, now);
   return base;
 }
 
@@ -802,7 +845,7 @@ function serviceDecision(loaded: Loaded, now: Date): Choice | null {
   return null;
 }
 
-function qualificationDecision(loaded: Loaded, message: string | null): Choice {
+function qualificationDecision(loaded: Loaded, message: string | null, now: Date): Choice {
   const next = nextMissing(loaded);
   const words = message ? message.trim().split(/\s+/).length : 0;
   const short = message ? words <= 6 : false;
@@ -960,7 +1003,7 @@ function qualificationDecision(loaded: Loaded, message: string | null): Choice {
     };
   }
   const timeframe = (loaded.answers.get('timeframe') ?? valueOf(loaded, 'timeframe') ?? '').toLowerCase();
-  if (/next year|few months|6 months|six months|not now|later/.test(timeframe) && !tourFacts(loaded, new Date()).address) {
+  if (/next year|few months|6 months|six months|not now|later/.test(timeframe) && !tourFacts(loaded, now).address) {
     return {
       buckets: [],
       fields: {
@@ -978,7 +1021,7 @@ function qualificationDecision(loaded: Loaded, message: string | null): Choice {
         ask_qualification_now: false,
         owner: 'Client',
         follow_up_trigger: 'future_timeline',
-        follow_up_date: futureFollowUp(new Date()),
+        follow_up_date: futureFollowUp(now),
         draft_status: 'NONE',
       },
     };
@@ -1173,6 +1216,26 @@ function storeDraft(db: SqlDb, action: ExecutionAction, now: Date): string | nul
     action.opportunityId,
     content,
   );
+  const actionType = `human_${action.action_channel}`;
+  const channel = action.action_channel === 'email' ? 'email' : action.action_channel === 'call' ? 'voice' : action.action_channel === 'sms' ? 'sms' : 'manual';
+  const dedupe = `${action.opportunityId}|${actionType}|${channel}|${content.trim()}`;
+  const held = db.get(`SELECT id, status FROM approval_queue WHERE dedupe_key = ?`, dedupe);
+  if (held) {
+    const heldStatus = text(held, 'status');
+    if (heldStatus === 'CANCELLED') {
+      db.run(
+        `UPDATE approval_queue SET status = 'PENDING', updated_at = ? WHERE id = ?`,
+        now.toISOString(),
+        text(held, 'id'),
+      );
+    }
+    if (heldStatus === 'PENDING' || heldStatus === 'CANCELLED') {
+      action.approval_required = true;
+      action.sent = false;
+      action.provider_confirmed = false;
+      return text(held, 'id');
+    }
+  }
   const queued = enqueueApproval(db, {
     opportunityId: action.opportunityId,
     clientId: action.clientId,
@@ -1290,6 +1353,17 @@ function blank(loaded: Loaded, now: Date): ExecutionAction {
     summary_buckets: [],
     manual_marks: loaded.priorMarks,
     approval_id: null,
+    priority_tier: 'T2',
+    horizon: 'short',
+    waiting_on: null,
+    waiting_reason: null,
+    waiting_next_check: null,
+    execution_adapter: 'none',
+    execution_steps: '',
+    call_href: null,
+    evidence_label: 'NONE',
+    workflow_drift: false,
+    promise: null,
   };
 }
 
@@ -1389,6 +1463,26 @@ function loadOne(db: SqlDb, opportunityId: string, now: Date): Loaded {
 }
 
 function rankCards(cards: ExecutionAction[]): ExecutionAction[] {
+  const tiers = ['T0', 'T1', 'T2', 'T3'] as const;
+  return tiers.flatMap((tier) => {
+    const group = cards.filter((card) => card.priority_tier === tier);
+    const byUrgency = new Map<number, ExecutionAction[]>();
+    for (const card of group) {
+      const key = urgency(card);
+      byUrgency.set(key, [...(byUrgency.get(key) ?? []), card]);
+    }
+    return [...byUrgency.keys()].sort((a, b) => a - b).flatMap((key) => splitScore(byUrgency.get(key) ?? []));
+  });
+}
+
+function urgency(card: ExecutionAction): number {
+  if (card.waiting_on === 'KYLE' || card.promise) return 0;
+  if (card.summary_buckets.includes('showings_today')) return 1;
+  if (card.summary_buckets.includes('post_tour')) return 2;
+  return 3;
+}
+
+function splitScore(cards: ExecutionAction[]): ExecutionAction[] {
   const scored = cards.filter((card) => !card.held && card.engineScore != null);
   const held = cards.filter((card) => card.held || card.engineScore == null);
   scored.sort((a, b) => {
@@ -1687,6 +1781,305 @@ function sameDayEvening(now: Date): string {
 function futureFollowUp(now: Date): string {
   const parts = zonedParts(now);
   return zonedLocalToUtc(parts.year, parts.month, parts.day + 30, 9, 0).toISOString();
+}
+
+function applyOperations(loaded: Loaded, action: ExecutionAction, now: Date): void {
+  const promiseRaw = valueOf(loaded, 'kyle_promise');
+  const promiseOpen = Boolean(promiseRaw && !/kept|done|completed/i.test(promiseRaw));
+  action.promise = promiseOpen ? promiseRaw : null;
+  action.evidence_label = 'NONE';
+  action.workflow_drift = false;
+  action.waiting_on = null;
+  action.waiting_reason = null;
+  action.waiting_next_check = null;
+  action.call_href = null;
+
+  const verifiedDelivery = loaded.facts.find((fact) => fact.field === 'provider_delivery' && fact.kind === 'fact' && fact.verification === 'verified');
+  const last = loaded.priorMarks.at(-1);
+  if (verifiedDelivery) {
+    action.evidence_label = 'VERIFIED BY INTEGRATION';
+  } else if (last) {
+    action.evidence_label = 'MARKED BY KYLE';
+    const follow = outcomeFollowUp(loaded, last, now);
+    if (follow) {
+      Object.assign(action, follow.fields);
+      action.summary_buckets = [...new Set([
+        ...action.summary_buckets.filter((bucket) => bucket !== 'texts' && bucket !== 'emails' && bucket !== 'calls'),
+        ...follow.buckets,
+      ])];
+      if (follow.note) action.agent_tools_note_draft = follow.note;
+      if (action.client_draft) action.client_draft = cleanCopy(action.client_draft);
+    }
+  }
+
+  if (promiseOpen && !action.human_headline.startsWith('DO NOT') && action.evidence_label !== 'MARKED BY KYLE') {
+    action.waiting_on = 'KYLE';
+    action.waiting_reason = promiseRaw;
+    action.summary_buckets.push('promises', 'waiting_kyle');
+    action.why_now = `Kyle promised: ${promiseRaw}. A client waiting on Kyle comes before a passive lead. ${action.why_now}`.trim();
+    if (action.internal_action_type === 'ask_next_question') {
+      action.human_headline = `KEEP THE PROMISE TO ${firstName(loaded.name).toUpperCase()}`;
+      action.primary_action = `${promiseRaw} Do not send a different question first.`;
+      action.current_objective = 'Do the thing Kyle already promised.';
+      action.action_channel = loaded.phone ? 'sms' : 'manual';
+      action.client_draft = loaded.phone ? `${firstName(loaded.name)}, Kyle with Redfin. ${promiseRaw}` : null;
+      action.draft_status = loaded.phone ? 'DRAFT' : 'BLOCKED';
+    }
+  }
+
+  const tour = tourFacts(loaded, now);
+  const tourInstant = tour.rawWhen ? appointmentInstant(tour.rawWhen, now) : null;
+  if (tour.scheduled && !tour.past && tourInstant && sameEtDay(tourInstant, now)) {
+    action.summary_buckets.push('showings_today');
+  }
+  action.priority_tier = tierFor(action, tour, now);
+  action.horizon = action.priority_tier === 'T1' ? 'mid' : action.priority_tier === 'T3' ? 'long' : 'short';
+  action.execution_adapter = adapterFor(action);
+  action.execution_steps = stepsFor(action);
+  if (action.action_channel === 'call' && action.verified_phone) {
+    const key = phoneKey(action.verified_phone);
+    action.call_href = key ? `tel:+1${key}` : null;
+  }
+  const knownAction = /^(TEXT|CALL|EMAIL|GET|CMA|KEEP|WAIT|READ|DO NOT|OFFER|CALENDAR|CLOSED|NO NEXT|VERIFY|CREATE)/.test(action.human_headline);
+  const hasCopy = Boolean(action.client_draft || action.email_draft || action.call_opening);
+  const hasTrigger = Boolean(action.follow_up_date || action.waiting_on);
+  const hasInstruction = action.human_headline.trim().length > 0 && action.primary_action.trim().length > 0;
+  const noNextStep = action.human_headline.trim().length === 0 || (!knownAction && !hasCopy && !hasTrigger && !hasInstruction);
+  if (noNextStep) {
+    action.workflow_drift = true;
+    action.summary_buckets.push('workflow_drift');
+    action.human_headline = `NO NEXT STEP FOR ${firstName(loaded.name).toUpperCase()}`;
+    action.primary_action = 'This file has no next action, waiting condition, or future trigger. Retrieve the next real step from Agent Tools before it goes quiet.';
+    action.action_channel = 'manual';
+    action.client_draft = null;
+    action.draft_status = 'BLOCKED';
+  }
+  action.summary_buckets = [...new Set(action.summary_buckets)];
+  action.sent = false;
+  action.provider_confirmed = false;
+}
+
+function outcomeFollowUp(loaded: Loaded, last: ManualMark, now: Date): Choice | null {
+  const name = firstName(loaded.name);
+  const ageMs = now.getTime() - new Date(last.at).getTime();
+  const stale = ageMs > 24 * 60 * 60 * 1000;
+  if (last.mark === 'sent' || last.mark === 'waiting' || last.mark === 'called' || last.mark === 'no_reply') {
+    if (!stale && last.mark !== 'no_reply') {
+      return {
+        buckets: ['waiting_client'],
+        fields: {
+          human_headline: `WAIT ON ${name.toUpperCase()}`,
+          current_objective: 'The last outreach is marked sent by Kyle. Do not send it again.',
+          why_now: 'MARKED BY KYLE. No integration verified delivery. Wait for a reply before another message.',
+          primary_action: 'Do not resend the same text. Wait for their answer.',
+          action_channel: 'none',
+          client_draft: null,
+          email_draft: null,
+          call_opening: null,
+          draft_status: 'NONE',
+          waiting_on: 'CLIENT',
+          waiting_reason: 'Reply to the message Kyle marked sent.',
+          waiting_next_check: nextDayNoon(now),
+          follow_up_trigger: 'waiting_on_client',
+          follow_up_date: nextDayNoon(now),
+          owner: 'Client',
+          ask_qualification_now: false,
+        },
+        note: 'Kyle marked a send. The note is not pasted into Agent Tools from this mark. Delivery is not verified.',
+      };
+    }
+    return {
+      buckets: ['overdue', 'waiting_client'],
+      fields: {
+        human_headline: `TEXT ${name.toUpperCase()} NOW`,
+        current_objective: 'One follow-up with a reason. Not a resend.',
+        why_now: 'The earlier mark is more than a day old and no reply is on file. MARKED BY KYLE, not verified by an integration.',
+        primary_action: 'Send one new question about the open outcome. Do not paste the old text again.',
+        action_channel: loaded.phone ? 'sms' : 'manual',
+        client_draft: loaded.phone ? `${name}, still need one answer on that last note. What happened?` : null,
+        draft_status: loaded.phone ? 'DRAFT' : 'BLOCKED',
+        follow_up_trigger: 'no_reply',
+        follow_up_date: sameDayEvening(now),
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'showing_completed' || last.mark === 'showing_occurred') {
+    return {
+      buckets: ['post_tour', 'texts'],
+      fields: {
+        human_headline: `TEXT ${name.toUpperCase()} NOW`,
+        current_objective: 'Ask what they thought. Attendance is Kyle-reported, not verified.',
+        why_now: 'MARKED BY KYLE. That is not proof the client attended and not a provider confirmation.',
+        primary_action: 'Ask what they thought once they got inside. Do not mark the tour completed in Agent Tools yet.',
+        client_draft: `${name}, what did you think once you got inside?`,
+        action_channel: loaded.phone ? 'sms' : 'manual',
+        draft_status: loaded.phone ? 'DRAFT' : 'BLOCKED',
+        tour_confirmation_state: 'NOT CONFIRMED. KYLE REPORTED, NOT VERIFIED',
+        customer_property_state: 'Kyle reported attendance. Not verified.',
+        ask_qualification_now: false,
+        follow_up_trigger: 'post_tour_reaction',
+      },
+    };
+  }
+  if (last.mark === 'showing_did_not_occur' || last.mark === 'showing_cancelled') {
+    return {
+      buckets: ['texts'],
+      fields: {
+        human_headline: `TEXT ${name.toUpperCase()} NOW`,
+        why_now: 'Kyle reported the showing did not happen. That is not a listing-side confirmation.',
+        primary_action: 'Ask if they still want to see it. Then verify access before booking another time.',
+        client_draft: `${name}, that showing did not happen on my side. Do you still want to see it?`,
+        action_channel: loaded.phone ? 'sms' : 'manual',
+        draft_status: loaded.phone ? 'DRAFT' : 'BLOCKED',
+        tour_confirmation_state: 'NOT CONFIRMED. KYLE REPORTED, NOT VERIFIED',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'client_replied') {
+    return {
+      buckets: ['waiting_client'],
+      fields: {
+        human_headline: `READ ${name.toUpperCase()}'S REPLY`,
+        why_now: 'Kyle marked a reply. The words are not in the file yet.',
+        primary_action: 'Paste what they actually said before choosing the next question. Do not invent the reply.',
+        action_channel: 'manual',
+        client_draft: null,
+        draft_status: 'BLOCKED',
+        waiting_on: 'KYLE',
+        waiting_reason: 'The reply text is not stored.',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'wants_offer') {
+    return {
+      buckets: ['offers'],
+      fields: {
+        human_headline: `OFFER MODE FOR ${name.toUpperCase()}`,
+        why_now: 'Kyle marked offer interest. Interest is not a submitted offer.',
+        primary_action: 'Collect the first missing term. Do not tell anyone an offer is in.',
+        action_channel: 'manual',
+        client_draft: null,
+        draft_status: 'DRAFT',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'needs_financing') {
+    return {
+      buckets: ['financing'],
+      fields: {
+        human_headline: `TEXT ${name.toUpperCase()} NOW`,
+        why_now: 'Kyle marked a financing need. That is not a preapproval.',
+        primary_action: 'Offer a lender intro. Do not treat them as disqualified.',
+        client_draft: `${name}, no problem. I can get you connected with someone and get that piece handled. Want me to make the intro?`,
+        action_channel: loaded.phone ? 'sms' : 'manual',
+        draft_status: loaded.phone ? 'DRAFT' : 'BLOCKED',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'needs_to_sell' || last.mark === 'listing_appointment_set') {
+    return {
+      buckets: ['cma', 'buy_after_sell'],
+      fields: {
+        human_headline: `CMA NEEDED FOR ${name.toUpperCase()}`,
+        why_now: 'Kyle marked a sell-side need. The address still has to be verified.',
+        primary_action: 'Get the current home address before any CMA. Do not assume the house.',
+        action_channel: 'manual',
+        client_draft: null,
+        draft_status: 'BLOCKED',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'contact_found') {
+    return {
+      buckets: ['missing_contact'],
+      fields: {
+        human_headline: `VERIFY ${name.toUpperCase()}'S CELL`,
+        why_now: 'Kyle marked a contact as found. It is not a verified phone until it is stored on the client.',
+        primary_action: 'Add the verified phone or email to the client record. Do not text a number that is only in your head.',
+        action_channel: 'manual',
+        client_draft: null,
+        draft_status: 'BLOCKED',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'property_unavailable' || last.mark === 'not_interested') {
+    return {
+      buckets: ['texts'],
+      fields: {
+        human_headline: `TEXT ${name.toUpperCase()} NOW`,
+        why_now: last.mark === 'property_unavailable' ? 'Kyle marked the property unavailable. The client is not dead.' : 'Kyle marked not interested. Ask what missed before sending other homes.',
+        primary_action: 'One question about what they wanted. Do not send a list.',
+        client_draft: `${name}, what was it about that place that caught your eye?`,
+        action_channel: loaded.phone ? 'sms' : 'manual',
+        draft_status: loaded.phone ? 'DRAFT' : 'BLOCKED',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  if (last.mark === 'interested' || last.mark === 'call_completed') {
+    return {
+      buckets: ['calls'],
+      fields: {
+        human_headline: `CALL ${name.toUpperCase()} NOW`,
+        why_now: 'Kyle marked interest or a completed call. The next step is still a conversation, not a new drip.',
+        primary_action: 'Call and listen. One next step from what they say.',
+        action_channel: loaded.phone ? 'call' : 'manual',
+        call_opening: `Hey ${name}, it's Kyle. Where do you want to go from here?`,
+        client_draft: null,
+        draft_status: 'DRAFT',
+        ask_qualification_now: false,
+      },
+    };
+  }
+  return null;
+}
+
+function tierFor(action: ExecutionAction, tour: TourView, now: Date): 'T0' | 'T1' | 'T2' | 'T3' {
+  if (action.human_headline.startsWith('DO NOT')) return 'T3';
+  if (action.waiting_on === 'CLIENT' && !action.summary_buckets.includes('overdue')) return 'T3';
+  if (action.summary_buckets.includes('overdue')) return 'T1';
+  if (action.waiting_on === 'KYLE' || action.promise) return 'T0';
+  if (action.human_headline.startsWith('WAIT')) return 'T3';
+  if (action.summary_buckets.includes('post_tour') || action.internal_action_type === 'tour_follow_up') return 'T0';
+  if (action.summary_buckets.includes('showings_today')) return 'T0';
+  if (action.action_channel === 'call' && action.human_headline.startsWith('CALL')) return 'T0';
+  if (action.summary_buckets.includes('offers') && action.verified_phone) return 'T0';
+  if (action.summary_buckets.includes('under_contract')) return 'T0';
+  if (tour.scheduled && !tour.past) {
+    const instant = tour.rawWhen ? appointmentInstant(tour.rawWhen, now) : null;
+    if (instant && instant.getTime() - now.getTime() <= 48 * 60 * 60 * 1000) return 'T1';
+    return 'T2';
+  }
+  if (action.summary_buckets.includes('financing') || action.summary_buckets.includes('waiting_listing')) return 'T1';
+  if (action.summary_buckets.includes('cma') || action.summary_buckets.includes('buy_after_sell')) return 'T2';
+  if (action.human_headline.startsWith('GET ') || action.human_headline.startsWith('VERIFY ') || (action.draft_status === 'BLOCKED' && action.summary_buckets.includes('missing_contact'))) return 'T3';
+  if (action.human_headline.startsWith('WAIT') || action.waiting_on === 'CLIENT') return 'T3';
+  if (action.summary_buckets.includes('overdue')) return 'T1';
+  return 'T2';
+}
+
+function adapterFor(action: ExecutionAction): string {
+  if (action.action_channel === 'call') return 'tel_link';
+  if (action.action_channel === 'email') return 'copy_open_mail_paste_send';
+  if (action.action_channel === 'sms') return 'copy_open_messages_paste_send';
+  if (action.human_headline.startsWith('GET ') || action.human_headline.startsWith('VERIFY ')) return 'retrieve';
+  return 'none';
+}
+
+function stepsFor(action: ExecutionAction): string {
+  if (action.action_channel === 'sms') return 'Copy the text. Open your own messages. Paste it. Send it yourself. KyleOS cannot send it.';
+  if (action.action_channel === 'email') return 'Copy the email. Open your own mail. Paste it. Send it yourself. KyleOS cannot send it.';
+  if (action.action_channel === 'call') return 'Tap Call. Kyle places the call. KyleOS cannot dial.';
+  if (action.human_headline.startsWith('GET ') || action.human_headline.startsWith('VERIFY ')) return 'Open Agent Tools or Redfin and retrieve the missing fact. Do not invent it.';
+  if (action.waiting_on) return 'Do not send another message while this wait is still good. Come back at the next check.';
+  return 'Do this step yourself. KyleOS did not execute it.';
 }
 
 function count(cards: ExecutionAction[], key: string): number {
