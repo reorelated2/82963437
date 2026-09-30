@@ -114,6 +114,8 @@ export interface FactInput {
   kind: FactKind;
   verification: FactVerification;
   source: string;
+  /** When the fact itself is dated. Import time is the fallback. */
+  observedAt?: string;
 }
 
 export interface FactWriteResult {
@@ -479,6 +481,13 @@ export function flagDeskCandidates(db: SqlDb, input: {
   });
 }
 
+function factObservedAt(value: string | undefined): string | null {
+  if (!value?.trim()) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
+
 export function writeClientFact(db: SqlDb, input: {
   clientId: string;
   opportunityId: string | null;
@@ -488,6 +497,7 @@ export function writeClientFact(db: SqlDb, input: {
 }): FactWriteResult {
   const actor = input.actor ?? 'system';
   const nowIso = input.now.toISOString();
+  const observedIso = factObservedAt(input.fact.observedAt) ?? nowIso;
   const fieldKey = input.fact.fieldKey.trim();
   const value = input.fact.value.trim();
   const kind: FactKind = input.fact.kind === 'inference' ? 'inference' : 'fact';
@@ -537,7 +547,7 @@ export function writeClientFact(db: SqlDb, input: {
       kind,
       verification,
       input.fact.source,
-      nowIso,
+      observedIso,
       nowIso,
     );
     audit(db, actor, kind === 'inference' ? 'inference_stored' : 'fact_stored', null, 'client_fact', input.clientId, {

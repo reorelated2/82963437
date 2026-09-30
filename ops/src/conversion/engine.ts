@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { text, transaction, type SqlDb } from '../sql.ts';
-import { appointmentHasPassed } from '../time.ts';
+import { appointmentHasPassed, appointmentInstant } from '../time.ts';
 import { enqueueApproval, cancelPendingApprovals } from './approval.ts';
 import { isOpportunityDoNotContact } from './guards.ts';
 import {
@@ -903,7 +903,11 @@ function detectTourSignal(db: SqlDb, opp: Opp, now: Date): TourChoice | null {
     if (field === 'tours_completed' && /^0+(\.0+)?$/.test(value.trim())) zeroCompleted = true;
     if (/coordinator|showing agent/i.test(value)) coordinator = true;
     if (verifiedFact && scheduledTourLanguage(field, value)) {
-      if (appointmentHasPassed(value, now)) pastScheduled = pastScheduled || `${field}: ${value}`;
+      const dated = appointmentInstant(value, now);
+      const passed = dated
+        ? dated.getTime() < now.getTime()
+        : sourceDatePassed(text(row, 'observed_at'), now);
+      if (passed) pastScheduled = pastScheduled || `${field}: ${value}`;
       else scheduled = `${field}: ${value}`;
       continue;
     }
@@ -1127,20 +1131,17 @@ function claimsTourHappened(value: string): boolean {
 }
 
 function tourMoment(value: string, observedAt: string, now: Date): number | null {
-  const iso = value.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-  if (iso?.[1]) {
-    const parsed = Date.parse(`${iso[1]}T00:00:00.000Z`);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  const month = value.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b/i);
-  if (month?.[1] && month[2]) {
-    const names = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-    const index = names.indexOf(month[1].toLowerCase().slice(0, 3));
-    const day = Number(month[2]);
-    if (index >= 0 && day >= 1 && day <= 31) return Date.UTC(now.getUTCFullYear(), index, day);
-  }
+  const instant = appointmentInstant(value, now);
+  if (instant) return instant.getTime();
   const observed = Date.parse(observedAt);
   return Number.isNaN(observed) ? null : observed;
+}
+
+/** A per-fact source date, not the import clock. Undated "upcoming" lines older than 21 days are history. */
+function sourceDatePassed(observedAt: string, now: Date): boolean {
+  const parsed = Date.parse(observedAt);
+  if (Number.isNaN(parsed)) return false;
+  return now.getTime() - parsed > 21 * 24 * 60 * 60 * 1000;
 }
 
 function clip(value: string): string {

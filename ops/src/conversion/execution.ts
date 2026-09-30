@@ -367,7 +367,7 @@ function renderCard(card: ExecutionAction): string {
     `WHERE: ${card.where}`,
     `PHONE: ${card.verified_phone ?? 'DATA NEEDED'}`,
     `EMAIL: ${card.verified_email ?? 'DATA NEEDED'}`,
-    `COPY: ${card.client_draft ? `"${card.client_draft}"` : 'DATA NEEDED'}`,
+    `COPY: ${copyText(card)}`,
     `EMAIL SUBJECT: ${card.email_subject ?? 'none'}`,
     `EMAIL COPY: ${card.email_draft ? card.email_draft : 'none'}`,
     `LISTING AGENT COPY: ${card.listing_agent_draft ?? 'none'}`,
@@ -410,10 +410,11 @@ function decide(loaded: Loaded, now: Date): ExecutionAction {
   if (loaded.dueAt && loaded.dueAt < now.toISOString()) buckets.add('overdue');
 
   const safety = safetyDecision(loaded, message);
-  const choice = safety ?? contentDecision(loaded, message, now) ?? serviceDecision(loaded, now) ?? qualificationDecision(loaded, message, now);
+  const choice = safety ?? recordedPassChoice(loaded) ?? contentDecision(loaded, message, now) ?? serviceDecision(loaded, now) ?? qualificationDecision(loaded, message, now);
   Object.assign(base, choice.fields);
   base.summary_buckets = [...new Set([...choice.buckets, ...buckets, ...choice.fields.summary_buckets ?? []])];
   base.agent_tools_note_draft = choice.note ?? defaultNote(base, now);
+  fillEmailDraft(loaded, base);
   if (base.client_draft) base.client_draft = cleanCopy(base.client_draft);
   if (base.email_draft) base.email_draft = cleanCopy(base.email_draft);
   if (base.listing_agent_draft) base.listing_agent_draft = cleanCopy(base.listing_agent_draft);
@@ -662,25 +663,171 @@ function milestoneChoice(loaded: Loaded, now: Date): Choice | null {
   return null;
 }
 
+const WEEKDAY_WINDOW_DAYS = 6;
+const TOUR_HISTORY_DAYS = 21;
+
+function calendarAgeDays(instant: Date, now: Date): number {
+  const tour = zonedParts(instant);
+  const today = zonedParts(now);
+  const tourUtc = Date.UTC(tour.year, tour.month - 1, tour.day);
+  const todayUtc = Date.UTC(today.year, today.month - 1, today.day);
+  return Math.round((todayUtc - tourUtc) / 86400000);
+}
+
+function showingWhenPhrase(instant: Date, now: Date): { phrase: string; history: boolean } {
+  const age = calendarAgeDays(instant, now);
+  const parts = zonedParts(instant);
+  const date = `${parts.month}/${parts.day}`;
+  if (age > TOUR_HISTORY_DAYS) return { phrase: `on ${date}`, history: true };
+  if (age >= 0 && age <= WEEKDAY_WINDOW_DAYS) return { phrase: `on ${weekdayLong(instant)}`, history: false };
+  return { phrase: `on ${date}`, history: false };
+}
+
+function primaryTourInstant(loaded: Loaded, now: Date): Date | null {
+  const direct = valueOf(loaded, 'tour_datetime');
+  if (direct) {
+    const parsed = appointmentInstant(direct, now);
+    if (parsed) return parsed;
+  }
+  for (const key of ['recent_tour_note', 'past_tour_note', 'tours_summary']) {
+    const row = loaded.facts.find((fact) => fact.field === key);
+    if (!row) continue;
+    const parsed = appointmentInstant(row.value, now);
+    if (parsed) return parsed;
+    const observed = Date.parse(row.observedAt);
+    if (Number.isNaN(observed)) continue;
+    if (calendarAgeDays(new Date(observed), now) > 1) return new Date(observed);
+  }
+  return null;
+}
+
+function searchSummary(raw: string | null): string | null {
+  if (!raw) return null;
+  const lines = raw.split(/\n+/).map((line) => line.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
+  const piece = lines[0]?.replace(/\s+/g, ' ').trim() ?? '';
+  if (!piece) return null;
+  const clipped = piece.length > 120 ? piece.slice(0, 117).trim() : piece;
+  return clipped.replace(/[—–]/g, ', ');
+}
+
+function recordedPass(loaded: Loaded): { text: string; verified: boolean } | null {
+  const fields = ['tour_outcome', 'recent_tour_note', 'past_tour_note', 'showing_note', 'client_note', 'outcome_note'];
+  for (const field of fields) {
+    const row = loaded.facts.find((fact) => fact.field === field);
+    if (!row) continue;
+    if (!/\b(passed on|passed because|client passed|they passed|buyer passed|declined|not interested|no longer interested|walked away)\b/i.test(row.value)) continue;
+    return { text: row.value, verified: row.kind === 'fact' && row.verification === 'verified' };
+  }
+  return null;
+}
+
+function recordedPassChoice(loaded: Loaded): Choice | null {
+  const pass = recordedPass(loaded);
+  if (!pass) return null;
+  const name = firstName(loaded.name);
+  const address = valueOf(loaded, 'property_address');
+  const place = address ? streetLine(address) : 'that one';
+  const cashOnly = /cash[- ]only/i.test(pass.text);
+  const draft = cashOnly
+    ? `${name}, I have a note that you passed on ${place} because it is cash only. Want me to send a couple that fit financing?`
+    : `${name}, I have a note that you passed on ${place}. Want me to send a couple that fit how you're paying?`;
+  return {
+    buckets: ['texts'],
+    fields: draftFields(loaded, {
+      human_headline: `TEXT ${name.toUpperCase()} NOW`,
+      current_objective: 'They passed on that property. Offer a next option that fits how they pay.',
+      why_now: pass.verified
+        ? 'The file records a pass. Do not ask what they thought, and do not leave the showing as outcome unknown.'
+        : 'An unverified note says they passed. That is an inference, not a verified outcome. Do not ask what they thought.',
+      primary_action: 'Offer comparable options that fit their financing. Do not ask whether they saw it.',
+      client_draft: draft,
+      customer_property_state: pass.verified ? 'Passed on the property' : 'Inference: passed on the property. Not verified.',
+      tour_confirmation_state: pass.verified
+        ? 'PASSED. RECORDED ON THE FILE. NOT A PROVIDER CONFIRMATION.'
+        : 'NOT CONFIRMED. INFERENCE SAYS PASSED. NOT VERIFIED.',
+      ask_qualification_now: false,
+      follow_up_trigger: 'passed_property',
+    }),
+    note: pass.verified
+      ? 'Pass is a recorded fact. It is not a provider confirmation and Agent Tools was not written.'
+      : 'Pass is an inference. It is not verified and Agent Tools was not written.',
+  };
+}
+
+function historyChoice(loaded: Loaded, instant: Date, now: Date): Choice {
+  const parts = zonedParts(instant);
+  const date = `${parts.month}/${parts.day}`;
+  const name = firstName(loaded.name);
+  const summary = searchSummary(valueOf(loaded, 'saved_search'));
+  const draft = summary
+    ? `${name}, the ${date} showing is behind us. Are you still focused on ${summary}?`
+    : `${name}, the ${date} showing is behind us. What do you want to see next?`;
+  return {
+    buckets: ['texts'],
+    fields: draftFields(loaded, {
+      human_headline: `TEXT ${name.toUpperCase()} NOW`,
+      current_objective: 'The old tour is history. Ask what they want next.',
+      why_now: `The tour date ${date} is more than 21 days old. Do not ask if they just saw it.`,
+      primary_action: 'One question about what they want next. Do not ask whether they saw that old tour.',
+      client_draft: draft,
+      customer_property_state: 'Past history',
+      tour_confirmation_state: 'NOT AN OPEN SHOWING',
+      ask_qualification_now: false,
+      follow_up_trigger: 'past_history',
+      tour_date_time: date,
+    }),
+    note: `${shortDate(now)} The ${date} showing is past history. No attendance text was drafted. Agent Tools was not written.`,
+  };
+}
+
+function copyText(card: ExecutionAction): string {
+  if (card.action_channel === 'email' && card.verified_email && card.email_draft) {
+    const subject = card.email_subject ? `Subject: ${card.email_subject}. ` : '';
+    return `"${subject}${card.email_draft.replace(/\s*\n+\s*/g, ' ')}"`;
+  }
+  if (card.client_draft) return `"${card.client_draft}"`;
+  return 'DATA NEEDED';
+}
+
+function fillEmailDraft(loaded: Loaded, action: ExecutionAction): void {
+  if (action.action_channel !== 'email' || !loaded.email) return;
+  if (action.email_draft && action.email_subject) return;
+  const question = action.next_qualification_question || 'What should I handle next on this search?';
+  const built = emailFor(loaded, question.endsWith('?') ? question : `${question}?`);
+  action.email_subject = action.email_subject ?? built.subject;
+  if (!action.email_draft) {
+    const spoken = action.client_draft?.trim();
+    action.email_draft = spoken
+      ? [`Hi ${firstName(loaded.name)},`, '', spoken, '', 'Kyle Kleinman', 'Redfin, Miami-Dade and Broward', KYLE_PHONE].join('\n')
+      : built.body;
+  }
+}
+
 function serviceDecision(loaded: Loaded, now: Date): Choice | null {
   const tour = tourFacts(loaded, now);
   const pending = /pending|sold|off market|cancelled|canceled/i.test(baseStatus(loaded));
   const pastTour = (tour.past && !tour.outcomeKnown) || (loaded.engineType === 'tour_follow_up' && !tour.outcomeKnown);
+  const timed = primaryTourInstant(loaded, now);
+  const aged = timed ? showingWhenPhrase(timed, now) : null;
+  if (pastTour && aged?.history) return historyChoice(loaded, timed!, now);
   if (pastTour) {
-    const day = tour.weekday;
     const street = tour.address ? streetLine(tour.address) : null;
     const claimed = /completed|happened|already showed|\btoured\b/i.test(`${valueOf(loaded, 'recent_tour_note') ?? ''} ${valueOf(loaded, 'tour_outcome') ?? ''}`)
       && !/unconfirmed|not confirmed|outcome unknown/i.test(`${valueOf(loaded, 'recent_tour_note') ?? ''} ${valueOf(loaded, 'tour_outcome') ?? ''}`);
+    const whenPhrase = aged?.phrase ?? null;
     const copy = claimed
       ? `${firstName(loaded.name)}, what did you think of ${street ?? 'the place'}?`
-      : street && day
-        ? `${firstName(loaded.name)}, did you end up seeing ${street} on ${day}?`
+      : street && whenPhrase
+        ? `${firstName(loaded.name)}, did you end up seeing ${street} ${whenPhrase}?`
         : street
           ? `${firstName(loaded.name)}, did you end up seeing ${street}?`
-          : `${firstName(loaded.name)}, did you end up seeing it?`;
+          : whenPhrase
+            ? `${firstName(loaded.name)}, did you end up seeing it ${whenPhrase}?`
+            : `${firstName(loaded.name)}, did you end up seeing it?`;
     const when = tour.label ?? 'the scheduled time';
     const noteDate = shortDate(now);
     const happened = tour.rawWhen ? shortWhen(tour.rawWhen, now) : when;
+    const whenLabel = aged && !aged.history ? aged.phrase.replace(/^on /, '') : (tour.weekday ?? 'The');
     return {
       buckets: ['post_tour', 'texts'],
       note: `Do not mark the previous tour completed until verified. After Kyle confirms the text was sent, paste: "${noteDate} Kyle texted customer to verify whether the ${happened} showing at ${tour.address ?? 'the property'} occurred. Outcome pending customer response." Do not paste that note before the text is actually sent. Nothing has been sent.`,
@@ -689,7 +836,7 @@ function serviceDecision(loaded: Loaded, now: Date): Choice | null {
         current_objective: 'Learn whether the showing happened.',
         why_now: claimed
           ? 'A showing-agent or coordinator note is not a tour with Kyle and does not confirm the outcome.'
-          : `${tour.weekday ?? 'The'} showing outcome remains unknown. Do not assume the client attended.`,
+          : `${whenLabel} showing outcome remains unknown. Do not assume the client attended.`,
         primary_action: `Text ${firstName(loaded.name)}. Ask only whether they saw the property.`,
         where: loaded.phone ? `Messages. New text to ${loaded.phone}. KyleOS cannot send it.` : 'DATA NEEDED. No verified phone.',
         action_channel: 'sms',
@@ -812,6 +959,8 @@ function serviceDecision(loaded: Loaded, now: Date): Choice | null {
   }
   if (loaded.held && !loaded.phone && !loaded.email) {
     const property = valueOf(loaded, 'property_address');
+    const summary = searchSummary(valueOf(loaded, 'saved_search'));
+    const summaryLine = summary ? (summary.endsWith('.') ? summary : `${summary}.`) : null;
     return {
       buckets: ['missing_contact', ...(valueOf(loaded, 'offer_note') ? ['offers'] : [])],
       fields: {
@@ -825,8 +974,8 @@ function serviceDecision(loaded: Loaded, now: Date): Choice | null {
         action_channel: 'manual',
         client_draft: property
           ? `${firstName(loaded.name)}, Kyle with Redfin. I have your request on ${streetLine(property)} and we have not spoken. Are you still after that one?`
-          : valueOf(loaded, 'saved_search')
-            ? `${firstName(loaded.name)}, Kyle with Redfin. ${valueOf(loaded, 'saved_search')} Which one is the priority right now?`
+          : summaryLine
+            ? `${firstName(loaded.name)}, Kyle with Redfin. ${summaryLine} Which area is the priority right now?`
             : `${firstName(loaded.name)}, Kyle with Redfin. Which search is the priority right now?`,
         wait_for: 'A verified phone or email.',
         if_yes_next: 'Return them to the text or email queue the same day. Still do not send without approval.',
