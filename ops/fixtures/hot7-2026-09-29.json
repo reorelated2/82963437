@@ -1,0 +1,143 @@
+{
+  "dataset": "redfin_agent_tools_leads",
+  "mode": "DRY_RUN",
+  "exported_at": "2026-09-29T07:50:00.000Z",
+  "source_system": "redfin_agent_tools",
+  "synthetic": true,
+  "reconstruction_note": "Rebuilt from the 2026-09-29 DRY_RUN report after the original input JSON was deleted. Values that report did not contain are omitted. synthetic is true because this is a regression fixture, not a live Redfin export.",
+  "records": [
+    {
+      "record_id": "hot7-echo-niu",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-echo-niu", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": {
+        "display_name": "Echo Niu",
+        "phones": [{ "value": "(412) 478-9845", "verification": "verified" }],
+        "emails": []
+      },
+      "facts": [
+        { "field": "hot_score", "value": "165", "kind": "fact", "verification": "verified" },
+        { "field": "search_state", "value": "CRITERIA_PARTIAL", "kind": "fact", "verification": "verified" },
+        { "field": "saved_search", "value": "Miami 3-4 bd, 2.5+ ba, $500K-$1.5M, house/condo/townhouse, 1.4k+ sf", "kind": "fact", "verification": "verified" },
+        { "field": "tours_completed", "value": "0", "kind": "fact", "verification": "verified" },
+        { "field": "tours_summary", "value": "0 tours Sep 20 - Upcoming tour agent scheduled with Kyle Kleinman", "kind": "fact", "verification": "verified" },
+        { "field": "agent_tools_activity", "value": "Pending. Haven't met Kyle.", "kind": "fact", "verification": "verified" },
+        { "field": "recent_tour_note", "value": "Sun 9/27 6:00 PM showing scheduled at 90 SW 3rd St #308 with showing agent Larry Dix. Outcome unconfirmed. Source is a Gmail scheduled notice, not Kyle.", "kind": "inference", "verification": "unverified" },
+        { "field": "property_address", "value": "90 SW 3rd St #308", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_datetime", "value": "2026-09-27 18:00", "kind": "inference", "verification": "unverified" },
+        { "field": "showing_agent", "value": "Larry Dix", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_outcome", "value": "unconfirmed", "kind": "inference", "verification": "unverified" },
+        { "field": "price_note", "value": "$628K on the 9/27 tour note. Not verified against the current listing.", "kind": "inference", "verification": "unverified" },
+        { "field": "budget_note", "value": "Condo price band $540K-$865K from the 9/20 tours. Not her stated budget.", "kind": "inference", "verification": "unverified" },
+        { "field": "gmail_draft", "value": "2026-09-28 email draft exists and is unsent.", "kind": "inference", "verification": "unverified" }
+      ]
+    },
+    {
+      "record_id": "hot7-erena-rick-valle",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-erena-rick-valle", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": {
+        "display_name": "Erena & Rick Valle",
+        "phones": [{ "value": "(786) 201-1410", "verification": "verified" }],
+        "emails": []
+      },
+      "facts": [
+        { "field": "hot_score", "value": "156", "kind": "fact", "verification": "verified" },
+        { "field": "search_state", "value": "CRITERIA_PARTIAL", "kind": "fact", "verification": "verified" },
+        { "field": "saved_search", "value": "Distressed or no-HOA fixer $0-$400K. Miami Gardens 4-6 bd $350K-$500K.", "kind": "fact", "verification": "verified" },
+        { "field": "agent_tools_activity", "value": "Active. Ready.", "kind": "fact", "verification": "verified" },
+        { "field": "tours_summary", "value": "1 tours Sep 15 - Tour agent scheduled with Marcos Peon", "kind": "fact", "verification": "verified" },
+        { "field": "cash_tag", "value": "Cash buyer tag in Agent Tools. Not confirmed by the buyer.", "kind": "inference", "verification": "unverified" },
+        { "field": "recent_tour_note", "value": "Sep 25 4:00 PM tour at 17210 NW 47th Ave was canceled and combined into another tour by coordinator Rose Emmons. Outcome unknown.", "kind": "inference", "verification": "unverified" },
+        { "field": "property_address", "value": "17210 NW 47th Ave", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_datetime", "value": "2026-09-25 16:00", "kind": "inference", "verification": "unverified" },
+        { "field": "showing_agent", "value": "Rose Emmons, coordinator", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_outcome", "value": "unconfirmed", "kind": "inference", "verification": "unverified" },
+        { "field": "price_note", "value": "$390K on the canceled tour note. Not verified as the current list price.", "kind": "inference", "verification": "unverified" },
+        { "field": "identity_note", "value": "Redfin flagged the ID as not verified. Meet in public first. Unknown whether Rick is a decision maker.", "kind": "inference", "verification": "unverified" },
+        { "field": "gmail_draft", "value": "2026-09-28 email draft exists and is unsent.", "kind": "inference", "verification": "unverified" }
+      ]
+    },
+    {
+      "record_id": "hot7-claudia-pinheiro",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-claudia-pinheiro", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": {
+        "display_name": "Claudia Pinheiro",
+        "phones": [{ "value": "(305) 720-4643", "verification": "verified" }],
+        "emails": []
+      },
+      "facts": [
+        { "field": "contact_note", "value": "Phone came from Kyle's paste on 9/25 and was treated as confirmed. Email was on a screenshot. The address was not retained.", "kind": "fact", "verification": "verified" },
+        { "field": "recent_tour_note", "value": "Sep 23 first tour at 8024 Tatum Waterway Dr #2B with showing agent German Capodiferro, not Kyle. Outcome not confirmed.", "kind": "inference", "verification": "unverified" },
+        { "field": "property_address", "value": "8024 Tatum Waterway Dr #2B", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_datetime", "value": "2026-09-23", "kind": "inference", "verification": "unverified" },
+        { "field": "showing_agent", "value": "German Capodiferro", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_outcome", "value": "unconfirmed", "kind": "inference", "verification": "unverified" },
+        { "field": "price_note", "value": "$316K, 2 bed 2 bath, on the tour note. Not verified against the current listing.", "kind": "inference", "verification": "unverified" },
+        { "field": "rat_paraphrase", "value": "A RAT prompt says she asked for Kyle's help and a call. That is a paraphrase, not her words.", "kind": "inference", "verification": "unverified" },
+        { "field": "tour_notes_unverified", "value": "No special assessments and a 6-month minimum were in tour notes. Not verified.", "kind": "inference", "verification": "unverified" },
+        { "field": "gmail_draft", "value": "2026-09-25 email draft exists and is unsent.", "kind": "inference", "verification": "unverified" }
+      ]
+    },
+    {
+      "record_id": "hot7-alberto-alonso",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-alberto-alonso", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": {
+        "display_name": "Alberto Alonso",
+        "phones": [],
+        "emails": [{ "value": "aalonsojr2007@gmail.com", "verification": "verified" }]
+      },
+      "facts": [
+        { "field": "search_state", "value": "CRITERIA_PARTIAL", "kind": "fact", "verification": "verified" },
+        { "field": "saved_search", "value": "33018, house, no HOA, several saved searches", "kind": "fact", "verification": "verified" },
+        { "field": "meeting_note", "value": "0 tours Sep 19 - Meeting scheduled with Kyle Kleinman", "kind": "fact", "verification": "verified" },
+        { "field": "category_note", "value": "Pre-Mutual Deal was set about 2 hours before the 9/28 export. Not an engine stage.", "kind": "fact", "verification": "verified" },
+        { "field": "consult_note", "value": "Sep 19 11 AM virtual consult with Kyle, set by Sales Advisor Cindy Escobar. Outcome not recorded.", "kind": "inference", "verification": "unverified" },
+        { "field": "gmail_draft", "value": "2026-09-28 email draft exists and is unsent.", "kind": "inference", "verification": "unverified" }
+      ]
+    },
+    {
+      "record_id": "hot7-mark-maccagno",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-mark-maccagno", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": { "display_name": "Mark Maccagno", "phones": [], "emails": [] },
+      "facts": [
+        { "field": "hot_score", "value": "168", "kind": "fact", "verification": "verified" },
+        { "field": "category_note", "value": "Pre-Mutual Deal set 9/28. No saved searches.", "kind": "fact", "verification": "verified" },
+        { "field": "tours_summary", "value": "0 tours Aug 29 - Offer first try no contact with Kyle Kleinman", "kind": "fact", "verification": "verified" },
+        { "field": "offer_note", "value": "8/18 offer request $680K on 1298 NE 199th St. Offer first try, no contact with Kyle. Not known to have been written or submitted.", "kind": "fact", "verification": "verified" },
+        { "field": "property_address", "value": "1298 NE 199th St", "kind": "fact", "verification": "verified" },
+        { "field": "recent_note", "value": "Agent Tools recent note is truncated at Reconnected. The rest was not in the export.", "kind": "inference", "verification": "unverified" }
+      ]
+    },
+    {
+      "record_id": "hot7-perry-crawford",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-perry-crawford", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": { "display_name": "Perry Crawford", "phones": [], "emails": [] },
+      "facts": [
+        { "field": "hot_score", "value": "157", "kind": "fact", "verification": "verified" },
+        { "field": "agent_tools_activity", "value": "Active. Getting Ready.", "kind": "fact", "verification": "verified" },
+        { "field": "preferred_channel", "value": "text", "kind": "fact", "verification": "verified" },
+        { "field": "saved_search", "value": "You're watching Coral Gables multi-family under $850K and Miami homes in the $550K to $700K range.", "kind": "fact", "verification": "verified" },
+        { "field": "recent_tour_note", "value": "Tour cancelled Jul 25 with Harlan Murray.", "kind": "fact", "verification": "verified" }
+      ]
+    },
+    {
+      "record_id": "hot7-katherine-de-armas",
+      "disposition": "lead",
+      "source": { "system": "redfin_agent_tools", "source_id": "hot7-katherine-de-armas", "exported_at": "2026-09-29T07:50:00.000Z" },
+      "person": { "display_name": "Katherine De Armas", "phones": [], "emails": [] },
+      "facts": [
+        { "field": "hot_score", "value": "154", "kind": "fact", "verification": "verified" },
+        { "field": "agent_tools_activity", "value": "Browsing. Getting Ready.", "kind": "fact", "verification": "verified" },
+        { "field": "sell_side", "value": "Needs to sell first. Selling and buying. Not a recent statement from Katherine.", "kind": "fact", "verification": "verified" },
+        { "field": "saved_search", "value": "Upgrade search, $0-$3M, 4+ bedrooms, large lot.", "kind": "fact", "verification": "verified" },
+        { "field": "cma_reminder", "value": "May 18 create a sell CMA is still open and overdue.", "kind": "fact", "verification": "verified" },
+        { "field": "past_tour_note", "value": "Tour completed with Kyle Kleinman on Apr 20, from Agent Tools. Last touch after that was a bulk email on Jun 30.", "kind": "fact", "verification": "verified" }
+      ]
+    }
+  ]
+}

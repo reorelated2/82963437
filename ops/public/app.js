@@ -1,8 +1,9 @@
 const app = document.querySelector('#app');
 const state = {
   authed: false,
-  view: 'today',
+  view: 'brief',
   workspace: null,
+  brief: null,
   contact: null,
   review: null,
   agentRun: null,
@@ -31,12 +32,23 @@ async function boot() {
 }
 
 function route() {
-  const hash = location.hash || '#/today';
+  const hash = location.hash || '#/brief';
   const parts = hash.replace(/^#\//, '').split('/');
-  state.view = parts[0] || 'today';
+  state.view = parts[0] || 'brief';
   if (state.view === 'contact' && parts[1]) return openContact(decodeURIComponent(parts[1]));
   if (state.view === 'review' && parts[1]) return openReview(decodeURIComponent(parts[1]));
   if (state.view === 'today') return loadToday();
+  if (state.view === 'brief') return loadBrief();
+  render();
+}
+
+async function loadBrief() {
+  try {
+    state.brief = await api('/api/morning-brief');
+    state.view = 'brief';
+  } catch {
+    state.error = 'The morning brief could not load.';
+  }
   render();
 }
 
@@ -85,8 +97,9 @@ function shell() {
 function nav() {
   const bar = el('nav', { class: 'nav' });
   for (const item of [
+    ['brief', 'Brief'],
     ['today', 'Today'],
-    ['new', 'New lead'],
+    ['new', 'New'],
     ['search', 'Search'],
     ['queue', 'Queue'],
   ]) {
@@ -122,12 +135,172 @@ function main() {
   if (state.notice) node.append(el('div', { class: 'notice', id: 'notice', text: state.notice }));
   if (state.error) node.append(el('div', { class: 'error', id: 'error', text: state.error }));
   if (state.view === 'login') node.append(loginView());
+  if (state.view === 'brief') node.append(briefView());
   if (state.view === 'today') node.append(todayView());
   if (state.view === 'new') node.append(newLeadView());
   if (state.view === 'review') node.append(reviewView());
   if (state.view === 'contact') node.append(contactView());
   if (state.view === 'search' || state.view === 'queue') node.append(state.view === 'queue' ? queueView() : searchView());
   return node;
+}
+
+function briefView() {
+  const data = state.brief;
+  const wrap = el('div', { class: 'stack', id: 'morning-brief' });
+  if (!data) {
+    wrap.append(el('p', { text: 'Loading the morning brief.' }));
+    return wrap;
+  }
+  wrap.append(
+    el('h2', { class: 'headline', text: 'KYLEOS MORNING BRIEF' }),
+    el('p', { class: 'detail', id: 'brief-clock', text: `${data.generatedAtEt || data.generatedAt || ''} · ${data.clock === 'test' ? 'Test clock' : 'Production clock, America/New_York'}. DRY_RUN. Nothing on this screen was sent.` }),
+    el('p', { class: 'rule', text: 'Copy copies. Open opens a verified link. Call uses the phone dialer. Mark records only what you say you did. KyleOS did not text, email, call, or update Agent Tools.' }),
+  );
+  const cards = data.cards || [];
+  if (cards.length === 0) wrap.append(el('p', { class: 'empty', text: 'No open clients on this desk.' }));
+  for (const card of cards) wrap.append(briefCard(card));
+  const summary = el('section', { class: 'card', id: 'brief-summary' });
+  summary.append(el('h2', { text: 'Summary' }));
+  const buckets = [
+    ['texts', 'Texts to send'],
+    ['emails', 'Emails to send'],
+    ['calls', 'Calls to make'],
+    ['post_tour', 'Post tour'],
+    ['missing_contact', 'Contact to find'],
+    ['cma', 'CMAs needed'],
+    ['listing_agent', 'Listing agents'],
+    ['offers', 'Offers'],
+  ];
+  for (const [key, label] of buckets) {
+    const names = cards.filter((card) => (card.summary_buckets || []).includes(key)).map((card) => card.client_name);
+    const line = el('p', { class: 'summary-line' });
+    line.append(el('b', { text: `${label}: ` }));
+    if (names.length === 0) line.append(document.createTextNode('none'));
+    names.forEach((name, index) => {
+      if (index) line.append(document.createTextNode('; '));
+      const link = el('a', { href: `#card-${slug(name)}`, text: name });
+      line.append(link);
+    });
+    summary.append(line);
+  }
+  wrap.append(summary);
+  return wrap;
+}
+
+function briefCard(card) {
+  const cardEl = el('article', { class: 'card brief-card', id: `card-${slug(card.client_name)}` });
+  cardEl.append(
+    el('p', { class: 'priority', text: `PRIORITY ${card.priority} — ${card.client_name}` }),
+    el('p', { class: 'tier', text: `${card.priority_tier || 'T2'} · ${card.horizon || 'short'}` }),
+    el('p', { class: 'do-this', text: card.human_headline }),
+    el('p', { text: card.why_now }),
+    el('p', { class: 'how', text: card.execution_steps || '' }),
+    el('p', { text: `Do this: ${card.primary_action}` }),
+    el('p', { text: `Where: ${card.where}` }),
+    el('p', { text: `Property: ${card.property_address || 'DATA NEEDED'}` }),
+    el('p', { text: `Status: ${card.property_status}. Showing: ${card.customer_property_state}. Outcome: ${card.tour_confirmation_state}` }),
+    el('p', { text: `Phone: ${card.verified_phone || 'DATA NEEDED'}` }),
+    el('p', { text: `Email: ${card.verified_email || 'DATA NEEDED'}` }),
+    el('p', { text: `Wait for: ${card.wait_for}` }),
+    el('p', { text: `If yes: ${card.if_yes_next}` }),
+    el('p', { text: `If no: ${card.if_no_next}` }),
+    el('p', { text: `Next question: ${card.next_qualification_question || 'None.'} ${card.ask_qualification_now ? '' : 'Do not ask yet.'}` }),
+    el('p', { class: 'draft-flag', text: `${card.draft_status} / MANUAL ACTION REQUIRED. Not sent. Evidence: ${card.evidence_label || 'NONE'}.` }),
+  );
+  if (card.promise) cardEl.append(el('p', { class: 'needed', text: `Promise: ${card.promise}` }));
+  if (card.waiting_on) cardEl.append(el('p', { text: `Waiting on ${card.waiting_on}. ${card.waiting_reason || ''}` }));
+  if (card.workflow_drift) cardEl.append(el('p', { class: 'needed', text: 'WORKFLOW DRIFT. This file has no concrete next step.' }));
+  if (card.client_draft) cardEl.append(el('p', { class: 'message', text: card.client_draft }));
+  if (card.email_draft) cardEl.append(el('p', { class: 'message', text: `${card.email_subject || ''}\n${card.email_draft}` }));
+  if (card.listing_agent_draft) cardEl.append(el('p', { class: 'message', text: card.listing_agent_draft }));
+  if (card.call_opening) cardEl.append(el('p', { class: 'message', text: card.call_opening }));
+  if (card.blocked_reason) cardEl.append(el('p', { class: 'needed', text: card.blocked_reason }));
+  for (const conflict of card.conflicts || []) cardEl.append(el('p', { class: 'needed', text: `DATA CONFLICT: ${conflict}` }));
+  for (const mark of card.manual_marks || []) cardEl.append(el('p', { class: 'notice', text: mark.note }));
+  const actions = el('div', { class: 'actions' });
+  actions.append(
+    thumb('Copy client text', Boolean(card.client_draft), () => copyExact(card.client_draft, 'Client text copied. Nothing was sent.')),
+    thumb('Copy listing agent text', Boolean(card.listing_agent_draft), () => copyExact(card.listing_agent_draft, 'Listing agent text copied. Nothing was sent.')),
+    thumb('Copy email', Boolean(card.email_draft), () => copyExact(`${card.email_subject || ''}\n${card.email_draft}`, 'Email copied. Nothing was sent.')),
+    openThumb('Open Redfin property', card.property_redfin_url),
+    openThumb('Open Agent Tools', card.agent_tools_url),
+    thumb('Copy Agent Tools note', Boolean(card.agent_tools_note_draft), () => copyExact(card.agent_tools_note_draft, 'Note copied. Agent Tools was not updated.')),
+    callThumb(card),
+    thumb('Mark sent manually', true, () => markCard(card, 'sent')),
+    thumb('Client replied', true, () => markCard(card, 'client_replied')),
+    thumb('No reply', true, () => markCard(card, 'no_reply')),
+    thumb('Showing occurred', true, () => markCard(card, 'showing_occurred')),
+    thumb('Showing did not occur', true, () => markCard(card, 'showing_did_not_occur')),
+    thumb('Mark called', true, () => markCard(card, 'called')),
+    thumb('Mark Agent Tools updated', true, () => markCard(card, 'agent_tools_updated')),
+    thumb('Mark waiting for response', true, () => markCard(card, 'waiting')),
+    thumb('Mark showing completed', true, () => markCard(card, 'showing_completed')),
+    thumb('Mark showing cancelled', true, () => markCard(card, 'showing_cancelled')),
+    thumb('Mark offer submitted', true, () => markCard(card, 'offer_submitted')),
+  );
+  cardEl.append(actions);
+  const detail = el('details');
+  detail.append(el('summary', { text: 'Source detail' }));
+  detail.append(el('p', { text: `Engine code (internal): ${card.internal_action_type}` }));
+  detail.append(el('p', { text: `Known: ${(card.verified_facts || []).join(' | ') || 'DATA NEEDED'}` }));
+  detail.append(el('p', { text: `Unknown: ${(card.unknowns || []).join(' | ')}` }));
+  detail.append(el('p', { text: `Redfin: ${card.property_redfin_url || 'LINK NOT FOUND'}` }));
+  detail.append(el('p', { text: `Agent Tools: ${card.agent_tools_url || 'LINK NOT FOUND'}` }));
+  detail.append(el('p', { text: `MLS: ${card.property_mls || 'DATA NEEDED'}` }));
+  cardEl.append(detail);
+  return cardEl;
+}
+
+function thumb(label, enabled, onclick) {
+  return el('button', {
+    type: 'button',
+    class: 'primary thumb',
+    text: enabled ? label : `${label} unavailable`,
+    disabled: !enabled,
+    onclick: enabled ? onclick : undefined,
+  });
+}
+
+function callThumb(card) {
+  if (card.action_channel !== 'call' || !card.call_href) {
+    return el('button', { type: 'button', class: 'primary thumb', text: 'Call: no verified number', disabled: true });
+  }
+  return el('a', { class: 'primary thumb link-btn', href: card.call_href, text: `Call ${card.verified_phone}` });
+}
+
+function openThumb(label, url) {
+  if (!url) return el('button', { type: 'button', class: 'primary thumb', text: `${label}: LINK NOT FOUND`, disabled: true });
+  return el('a', { class: 'primary thumb link-btn', href: url, target: '_blank', rel: 'noopener noreferrer', text: label });
+}
+
+function slug(name) {
+  return String(name || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+async function copyExact(value, notice) {
+  if (!value) {
+    state.error = 'There is nothing to copy.';
+    render();
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    state.error = '';
+    state.notice = notice;
+  } catch {
+    state.error = 'Copy failed. Select the text and copy it yourself. Nothing was sent.';
+  }
+  render();
+}
+
+async function markCard(card, mark) {
+  const result = await api(`/api/execution/${encodeURIComponent(card.opportunityId)}/mark`, {
+    method: 'POST',
+    body: JSON.stringify({ mark }),
+  });
+  state.notice = result.message || 'Marked in KyleOS only.';
+  state.error = '';
+  await loadBrief();
 }
 
 function todayView() {
@@ -446,8 +619,8 @@ async function signIn(input) {
   }
   state.authed = true;
   state.error = '';
-  location.hash = '#/today';
-  await loadToday();
+  location.hash = '#/brief';
+  await loadBrief();
 }
 
 function agentTrace(run) {

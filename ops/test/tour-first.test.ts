@@ -174,6 +174,57 @@ test('a coordinator completion stays not with Kyle and not offer ready', () => {
   db.close();
 });
 
+test('a scheduled tour whose date has passed is outcome unknown, not upcoming', () => {
+  const db = tempDb();
+  const { clientId, opportunityId } = openInquiry(db, 'Fixture Past Tour', '3055550195');
+  writeClientFact(db, {
+    clientId,
+    opportunityId,
+    now: NOW,
+    fact: {
+      fieldKey: 'tours_summary',
+      value: '0 tours Sep 20 - Upcoming tour agent scheduled with Kyle Kleinman',
+      kind: 'fact',
+      verification: 'verified',
+      source: 'redfin_agent_tools:fixture-past',
+    },
+  });
+  const action = nextBestAction(db, opportunityId, NOW);
+  assert.equal(action.action_type, 'tour_follow_up');
+  assert.notEqual(action.action_type, 'confirm_tour_details');
+  assert.match(action.reason, /outcome is not confirmed/i);
+  assert.ok(action.priority_reasons.some((reason) => /not an upcoming tour/i.test(reason)));
+  const tour = db.get(`SELECT state, evidence FROM readiness_flags WHERE opportunity_id = ? AND flag = 'tour'`, opportunityId);
+  assert.equal(text(tour, 'state'), 'unverified');
+  assert.match(text(tour, 'evidence'), /POST TOUR VERIFICATION NEEDED/);
+  assert.doesNotMatch(text(tour, 'state'), /confirmed|completed/);
+  db.close();
+});
+
+test('a future scheduled tour still needs confirmation and is not completed', () => {
+  const db = tempDb();
+  const { clientId, opportunityId } = openInquiry(db, 'Fixture Future Tour', '3055550196');
+  writeClientFact(db, {
+    clientId,
+    opportunityId,
+    now: NOW,
+    fact: {
+      fieldKey: 'tours_summary',
+      value: 'Oct 3 - Upcoming tour agent scheduled',
+      kind: 'fact',
+      verification: 'verified',
+      source: 'redfin_agent_tools:fixture-future',
+    },
+  });
+  const action = nextBestAction(db, opportunityId, NOW);
+  assert.equal(action.action_type, 'confirm_tour_details');
+  assert.match(action.reason, /not confirmed|unconfirmed|who is showing/i);
+  const tour = db.get(`SELECT state FROM readiness_flags WHERE opportunity_id = ? AND flag = 'tour'`, opportunityId);
+  assert.equal(text(tour, 'state'), 'scheduled');
+  assert.notEqual(text(tour, 'state'), 'completed');
+  db.close();
+});
+
 test('no tour signal still returns the intake question as the primary action', () => {
   const db = tempDb();
   const { opportunityId } = openInquiry(db, 'Fixture Intake', '3055550194');

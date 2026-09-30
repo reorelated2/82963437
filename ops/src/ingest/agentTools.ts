@@ -11,9 +11,11 @@ import {
   type FactInput,
 } from '../canonical.ts';
 import { nextBestAction, openBuyerFile } from '../conversion/engine.ts';
+import { prepareExecution } from '../conversion/execution.ts';
 import { FINANCING_STATES, PRIMARY_STAGES, SEARCH_STATES, type FinancingState, type SearchState } from '../conversion/policy.ts';
 import { sendFlags } from '../mode.ts';
 import { text, type SqlDb } from '../sql.ts';
+import { appointmentInstant } from '../time.ts';
 
 /** Files larger than this are refused unless the caller names one record. */
 export const AGENT_TOOLS_BATCH_LIMIT = 8;
@@ -51,6 +53,9 @@ export interface AgentToolsRecord {
     kind: 'fact' | 'inference';
     verification: 'verified' | 'unverified';
     evidence?: string;
+    /** Date the fact was true. Wins over the import clock. */
+    source_date?: string;
+    observed_at?: string;
   }>;
   dedup_candidates?: Array<{ source_id?: string; display_name?: string; reason: string }>;
 }
@@ -177,7 +182,7 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
 
   const verifiedPhone = firstVerified(record.person.phones);
   const verifiedEmail = firstVerified(record.person.emails);
-  const facts = recordFacts(record);
+  const facts = recordFacts(record, now);
   const provenance = JSON.stringify({
     system: SOURCE,
     source_id: record.source.source_id,
@@ -294,6 +299,7 @@ function applyRecord(db: SqlDb, dataset: AgentToolsDataset, record: AgentToolsRe
   openBuyerFile(db, { opportunityId: ingested.opportunityId, now });
   applyVerifiedState(db, ingested.opportunityId, facts, now);
   const action = nextBestAction(db, ingested.opportunityId, now);
+  prepareExecution(db, ingested.opportunityId, now);
   const note = factualCrmNote(record, facts);
   recordCanonicalEvent(db, {
     idempotencyKey: `${key}:provenance`,
@@ -390,6 +396,7 @@ function finishHeld(
       now.toISOString(),
       held.opportunityId,
     );
+    if (held.opportunityId) prepareExecution(db, held.opportunityId, now);
     recordCanonicalEvent(db, {
       idempotencyKey: `agent-tools:${record.record_id}:provenance`,
       clientId: held.clientId,
@@ -539,7 +546,7 @@ function factualCrmNote(record: AgentToolsRecord, facts: FactInput[]): string {
   return lines.join('\n');
 }
 
-function recordFacts(record: AgentToolsRecord): FactInput[] {
+function recordFacts(record: AgentToolsRecord, now: Date): FactInput[] {
   const source = `${SOURCE}:${record.source.source_id}`;
   const facts: FactInput[] = (record.facts ?? []).map((fact) => ({
     fieldKey: fact.field.trim(),
@@ -547,6 +554,7 @@ function recordFacts(record: AgentToolsRecord): FactInput[] {
     kind: fact.kind === 'inference' ? 'inference' : 'fact',
     verification: fact.verification === 'verified' ? 'verified' : 'unverified',
     source,
+    observedAt: factSourceInstant(fact, now),
   }));
   for (const phone of record.person.phones ?? []) {
     if (phone.verification === 'inferred' && phone.value.trim()) {
@@ -559,6 +567,12 @@ function recordFacts(record: AgentToolsRecord): FactInput[] {
     }
   }
   return facts.filter((fact) => fact.fieldKey && fact.value);
+}
+
+function factSourceInstant(fact: { value: string; source_date?: string; observed_at?: string }, now: Date): string | undefined {
+  const explicit = fact.source_date?.trim() || fact.observed_at?.trim();
+  const chosen = (explicit ? appointmentInstant(explicit, now) : null) ?? appointmentInstant(fact.value, now);
+  return chosen ? chosen.toISOString() : undefined;
 }
 
 function verifiedValue(facts: FactInput[], field: string): string | null {
@@ -645,6 +659,8 @@ function parseFacts(value: unknown): AgentToolsRecord['facts'] {
       kind: row.kind,
       verification: row.verification,
       evidence: typeof row.evidence === 'string' ? row.evidence : undefined,
+      source_date: typeof row.source_date === 'string' ? row.source_date : undefined,
+      observed_at: typeof row.observed_at === 'string' ? row.observed_at : undefined,
     };
   });
 }
